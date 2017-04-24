@@ -26,7 +26,8 @@ public class MongoCountMembersFakeResult extends MongoAbstractResult implements 
 				  ),
 				  database,
 				  Integer.MAX_VALUE - 1,
-				  null
+				  null,
+				  false
 		);
 
 

@@ -20,6 +20,6 @@ public class MongoBasicResult extends MongoAbstractResult implements MongoResult
 {
 	public MongoBasicResult(Document result, MongoDatabase database, int maxRows) throws MongoSQLException
 	{
-		super(result, database, maxRows, null);
+		super(result, database, maxRows, null, false);
 	}
 }

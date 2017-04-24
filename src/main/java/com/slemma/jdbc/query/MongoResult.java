@@ -3,6 +3,7 @@ package com.slemma.jdbc.query;
 import com.mongodb.client.MongoDatabase;
 import com.slemma.jdbc.ConversionHelper;
 import com.slemma.jdbc.MongoField;
+import com.slemma.jdbc.MongoSQLException;
 import org.bson.Document;
 
 import java.util.ArrayList;
@@ -26,4 +27,6 @@ public interface MongoResult
 	ArrayList<MongoField> getFields();
 
 	MongoDatabase getDatabase();
+
+	boolean fetchData(int batchSize) throws MongoSQLException;
 }

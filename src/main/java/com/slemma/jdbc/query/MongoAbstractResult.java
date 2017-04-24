@@ -17,24 +17,26 @@ import java.util.Arrays;
  */
 public abstract class MongoAbstractResult implements MongoResult
 {
-	private final int DEFAULT_BATCH_SIZE = 1000;
+	public static final int DEFAULT_BATCH_SIZE = 1000;
 	protected MongoDatabase database;
 	protected final Document result;
 	protected final int maxRows;
 
 	private final ArrayList<String> docKeys = new ArrayList<>();
 	private final boolean isDistinct;
+	private DocumentTransformer documentTransformer;
+
 	protected ArrayList<Document> documentList;
 	protected ArrayList<MongoField> fields;
 
-	private void addDocuments(ArrayList<Document> documentList, DocumentTransformer transformer){
+	protected void addDocuments(ArrayList<Document> documentList){
 		if (this.documentList == null)
 			this.documentList = new ArrayList<>();
-		if (transformer != null || isDistinct) {
+		if (this.documentTransformer != null || isDistinct) {
 			for (Document document : documentList)
 			{
-				if (transformer != null) {
-					document = transformer.transform(document);
+				if (this.documentTransformer != null) {
+					document = this.documentTransformer.transform(document);
 				}
 
 				if (isDistinct) {
@@ -51,18 +53,36 @@ public abstract class MongoAbstractResult implements MongoResult
 		}
 	}
 
-	public MongoAbstractResult(Document result, MongoDatabase database, int maxRows, DocumentTransformer transformer) throws MongoSQLException{
-		this(result, database, maxRows, transformer, false);
+	public MongoAbstractResult(Document result, MongoDatabase database, int maxRows, DocumentTransformer transformer, boolean isDistinct) throws MongoSQLException{
+		this(result, database, maxRows, transformer, isDistinct, DEFAULT_BATCH_SIZE);
 	}
 
-	public MongoAbstractResult(Document result, MongoDatabase database, int maxRows, DocumentTransformer transformer, boolean isDistinct) throws MongoSQLException
+	public MongoAbstractResult(Document result, MongoDatabase database, int maxRows, DocumentTransformer transformer, boolean isDistinct, int batchSize) throws MongoSQLException
 	{
 		this.result = result;
 		this.maxRows = maxRows;
 		this.isDistinct = isDistinct;
+		this.documentTransformer = transformer;
+		this.database = database;
+
+		fetchData(batchSize);
+
+		if (this.getDocumentCount() > 0) {
+			MongoFieldPredictor predictor = new MongoFieldPredictor(this.getDocumentList());
+			this.fields = predictor.getFields();
+		} else {
+			this.fields = new ArrayList<>();
+		}
+	}
+
+	public boolean fetchData(int batchSize) throws MongoSQLException
+	{
+		//todo: refact
+		if (documentList != null)
+			return false;
 
 		if (this.result.containsKey("result"))
-			addDocuments((ArrayList<Document>) this.result.get("result"), transformer);
+			addDocuments((ArrayList<Document>) this.result.get("result"));
 		else if (this.result.containsKey("cursor"))
 		{
 			Document cursor = (Document) this.result.get("cursor");
@@ -70,9 +90,7 @@ public abstract class MongoAbstractResult implements MongoResult
 			MongoNamespace namespace = new MongoNamespace((String) cursor.get("ns"));
 
 			if (cursor.containsKey("firstBatch"))
-			{
-				addDocuments((ArrayList<Document>) cursor.get("firstBatch"), transformer);
-			}
+				addDocuments((ArrayList<Document>) cursor.get("firstBatch"));
 			else
 				throw new UnsupportedOperationException("Not implemented yet. Cursors without firstBatch.");
 
@@ -82,7 +100,7 @@ public abstract class MongoAbstractResult implements MongoResult
 
 			while (!stopFetch)
 			{
-				int nextBatchSize = this.documentList.size() + DEFAULT_BATCH_SIZE < maxRows ? DEFAULT_BATCH_SIZE : (maxRows - this.documentList.size());
+				int nextBatchSize = this.documentList.size() + batchSize < maxRows ? batchSize : (maxRows - this.documentList.size());
 				String getMoreCommandString = "{\n" +
 						  "   \"getMore\": " + nextBatch + ",\n" +
 						  "   \"collection\": \"" + namespace.getCollectionName() + "\",\n" +
@@ -96,7 +114,7 @@ public abstract class MongoAbstractResult implements MongoResult
 					Document nextBatchData = database.runCommand(docCommand);
 					Document nextCursor = (Document) nextBatchData.get("cursor");
 					nextBatch = nextCursor.getLong("id");
-					addDocuments((ArrayList<Document>) nextCursor.get("nextBatch"), transformer);
+					addDocuments((ArrayList<Document>) nextCursor.get("nextBatch"));
 
 					stopFetch = (nextBatch == null || nextBatch == 0 || this.documentList.size() >= maxRows);
 				}
@@ -104,7 +122,6 @@ public abstract class MongoAbstractResult implements MongoResult
 				{
 					throw new MongoSQLException("Error: " + e.getMessage() + "\n Query: " + getMoreCommandString);
 				}
-
 			}
 		}
 		else
@@ -113,14 +130,7 @@ public abstract class MongoAbstractResult implements MongoResult
 		if (this.documentList.size() > maxRows)
 			this.documentList.subList(maxRows, this.documentList.size()).clear();
 
-		this.database = database;
-
-		if (this.getDocumentCount() > 0) {
-			MongoFieldPredictor predictor = new MongoFieldPredictor(this.getDocumentList());
-			this.fields = predictor.getFields();
-		} else {
-			this.fields = new ArrayList<>();
-		}
+		return true;
 	}
 
 	public ArrayList<Document> getDocumentList()
@@ -151,5 +161,10 @@ public abstract class MongoAbstractResult implements MongoResult
 	public MongoDatabase getDatabase()
 	{
 		return database;
+	}
+
+	public DocumentTransformer getDocumentTransformer()
+	{
+		return documentTransformer;
 	}
 }

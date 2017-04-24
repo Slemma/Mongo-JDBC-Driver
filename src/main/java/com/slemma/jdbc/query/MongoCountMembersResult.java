@@ -21,7 +21,7 @@ public class MongoCountMembersResult extends MongoAbstractResult implements Mong
 
 	public MongoCountMembersResult(final CountMembersMixedQuery query, Document result, MongoDatabase database) throws MongoSQLException
 	{
-		super(result, database, Integer.MAX_VALUE-1, null);
+		super(result, database, Integer.MAX_VALUE-1, null, false);
 
 		this.query = query;
 

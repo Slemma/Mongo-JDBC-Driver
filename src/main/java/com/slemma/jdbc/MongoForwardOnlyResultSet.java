@@ -47,11 +47,11 @@ public class MongoForwardOnlyResultSet implements java.sql.ResultSet
 	 * Paging size, the original result will be paged by FETCH_SIZE rows
 	 */
 	//TODO: sync with mongo batch size
-	protected int FETCH_SIZE = 100000;
+	protected int FETCH_SIZE = 5000;
 	/**
 	 * The Fetched rows count at the original results
 	 */
-	protected BigInteger FETCH_POS = BigInteger.ZERO;
+//	protected BigInteger FETCH_POS = BigInteger.ZERO;
 	/**
 	 * Are we at the first row?
 	 */
@@ -60,6 +60,7 @@ public class MongoForwardOnlyResultSet implements java.sql.ResultSet
 	 * REference for the original statement which created this resultset
 	 */
 	private Statement Statementreference;
+
 	/** First page of the Results */
 	/**
 	 * Cursor position which goes from -1 to FETCH_SIZE then 0 to FETCH_SIZE
@@ -93,13 +94,14 @@ public class MongoForwardOnlyResultSet implements java.sql.ResultSet
 		else
 		{
 			this.RowsofResult = this.mongoResult.asArray();
-			FETCH_POS = FETCH_POS.add(BigInteger.valueOf((long) this.RowsofResult.length));
+//			FETCH_POS = FETCH_POS.add(BigInteger.valueOf((long) this.RowsofResult.length));
 		}
 	}
 
 	private void throwIfClosed() throws SQLException
 	{
-		if (this.isClosed()) {
+		if (this.isClosed())
+		{
 			throw new SQLException("This Resultset is Closed");
 		}
 	}
@@ -113,7 +115,8 @@ public class MongoForwardOnlyResultSet implements java.sql.ResultSet
 	private void throwIfInvalidIndex(int columnIndex) throws SQLException
 	{
 		if (this.getMetaData().getColumnCount() < columnIndex
-				  || columnIndex < 1) {
+				  || columnIndex < 1)
+		{
 			throw new SQLException("ColumnIndex is not valid");
 		}
 	}
@@ -1307,7 +1310,7 @@ public class MongoForwardOnlyResultSet implements java.sql.ResultSet
 	public Time getTime(int columnIndex, Calendar cal) throws SQLException
 	{
 		  /*
-         * Select STRFTIME_UTC_USEC(NOW(),'%x-%X%Z') AS One,
+			* Select STRFTIME_UTC_USEC(NOW(),'%x-%X%Z') AS One,
          * FORMAT_UTC_USEC(NOW()) as Two"; mongoResult: One Two 08/21/12-15:40:45GMT
          * 2012-08-21 15:40:45.703908
          */
@@ -1637,19 +1640,21 @@ public class MongoForwardOnlyResultSet implements java.sql.ResultSet
 		{
 			return false;
 		}
-		if (Cursor < FETCH_SIZE && Cursor < RowsofResult.length - 1)
+		if (Cursor < RowsofResult.length - 1)
 		{
-			if (Cursor == -1)
-			{
-				AT_FIRST = true;
-			}
-			else AT_FIRST = false;
+			AT_FIRST = (Cursor == -1);
 			Cursor++;
 			return true;
 		}
 		else
 		{
-			return false;
+			if (this.mongoResult.fetchData(FETCH_SIZE))
+			{
+				Cursor = 0;
+				this.RowsofResult = this.mongoResult.asArray();
+				return true;
+			}
+			else return false;
 		}
 	}
 

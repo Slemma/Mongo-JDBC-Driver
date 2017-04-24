@@ -41,8 +41,14 @@ public class MongoQueryExecutor
 				Document queryResult = database.runCommand(query.getMqlCommand());
 				mongoResult = new MongoGetMembersResult((GetMembersMixedQuery) query, queryResult, database, statement.getMaxRows());
 			} else if (query instanceof MongoQuery) {
+				int batchSize = statement.getFetchSize() != 0 ? statement.getFetchSize() : MongoAbstractResult.DEFAULT_BATCH_SIZE;
+				query.injectBatchSize(batchSize, true);
+
 				Document queryResult = database.runCommand(query.getMqlCommand());
-				mongoResult = new MongoBasicResult(queryResult, database, statement.getMaxRows());
+				if (statement.getFetchDirection() == ResultSet.TYPE_SCROLL_INSENSITIVE)
+					mongoResult = new MongoBasicResult(queryResult, database, statement.getMaxRows());
+				else
+					mongoResult = new MongoForwardOnlyResult(queryResult, database, statement.getMaxRows(), batchSize);
 			} else {
 				throw new UnsupportedOperationException("Unhandled query type.");
 			}

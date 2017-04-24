@@ -48,6 +48,8 @@ public abstract class AbstractMongoStatement
 	 */
 	private int maxFieldSize = 0;
 
+	private int fetchSize = 0;
+
 	/**
 	 * <p>
 	 * <h1>Implementation Details:</h1><br>
@@ -288,7 +290,7 @@ public abstract class AbstractMongoStatement
 	 */
 
 	public int getFetchSize() throws SQLException {
-		throw new MongoSQLException("Not implemented." + "getFetchSize()");
+		return this.fetchSize;
 	}
 
 	/**
@@ -590,6 +592,7 @@ public abstract class AbstractMongoStatement
 		if (this.isClosed()) {
 			throw new MongoSQLException("Statement closed");
 		}
+		this.fetchSize = arg0;
 	}
 
 	/**

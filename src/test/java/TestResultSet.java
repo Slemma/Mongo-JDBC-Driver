@@ -155,7 +155,7 @@ public class TestResultSet
 			Assert.assertNotNull(rs);
 
 			ResultSetMetaData rsMetadata = rs.getMetaData();
-			Assert.assertEquals(8, rsMetadata.getColumnCount());
+			Assert.assertEquals(7, rsMetadata.getColumnCount());
 			System.out.println("Columns metadata:");
 			for (int i = 1; i <= rsMetadata.getColumnCount(); i++)
 			{
@@ -374,6 +374,36 @@ public class TestResultSet
 
 			int rowCnt = Utils.printResultSet(rs);
 			Assert.assertEquals(100, rowCnt);
+		}
+		catch (SQLException e)
+		{
+			this.logger.error("Exception: " + e.toString());
+			Assert.fail("Exception: " + e.toString());
+		}
+		Assert.assertTrue(true);
+	}
+
+	@Test
+	public void maxRowsFORWARD_ONLY()
+	{
+		ResultSet rs;
+		String query = "{ " +
+				  "\"find\" : \"restaurants\"" +
+				  ", \"filter\" : { \"$and\" : [{ \"borough\" : { \"$ne\" : \"Bronx\" } }, { \"cuisine\" : \"Irish\" }] } " +
+				  ", \"limit\" : 150" +
+				  "}";
+		try
+		{
+			Statement stmt = this.con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+			stmt.setFetchSize(2);
+			stmt.setMaxRows(7);
+			rs = stmt.executeQuery(query);
+			rs.setFetchSize(2);
+
+			Assert.assertNotNull(rs);
+
+			int rowCnt = Utils.printResultSet(rs);
+			Assert.assertEquals(7, rowCnt);
 		}
 		catch (SQLException e)
 		{
