@@ -2,6 +2,7 @@ package com.slemma.jdbc;
 
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoDatabase;
+import com.slemma.jdbc.query.MongoExecutionOptions;
 import com.slemma.jdbc.query.MongoQuery;
 import com.slemma.jdbc.query.MongoQueryExecutor;
 import com.slemma.jdbc.query.MongoQueryParser;
@@ -14,6 +15,7 @@ import java.math.BigDecimal;
 import java.net.URL;
 import java.sql.*;
 import java.util.Calendar;
+import java.util.Properties;
 
 /**
  * @author Igor Shestakov.
@@ -197,12 +199,19 @@ public class MongoPreparedStatement extends AbstractMongoStatement implements Pr
 		}
 
 		this.starttime = System.currentTimeMillis();
-
 //		MongoClient mongoClient = this.connection.getMongoClient();
 //		MongoDatabase database = mongoClient.getDatabase(this.connection.getDatabase());
 		MongoQuery mongoQuery = MongoQueryParser.parse(this.RunnableStatement);
 		MongoQueryExecutor executor = new MongoQueryExecutor(this.connection.getMongoClient());
-		return executor.run(this.connection.getDatabase(), mongoQuery, this);
+
+		Properties connectionProperties = this.connection.getProperties();
+		MongoExecutionOptions eOptions = new MongoExecutionOptions.MongoExecutionOptionsBuilder()
+				  .batchSize(MongoDriverProperty.BATCH_SIZE.getInt(connectionProperties))
+				  .samplingBatchSize(this.getFetchSize() != 0 ? this.getFetchSize() : MongoDriverProperty.BATCH_SIZE.getInt(connectionProperties))
+				  .maxRows(this.getMaxRows())
+				  .createOptions();
+
+		return executor.run(this.connection.getDatabase(), mongoQuery, this, eOptions);
 
 	}
 

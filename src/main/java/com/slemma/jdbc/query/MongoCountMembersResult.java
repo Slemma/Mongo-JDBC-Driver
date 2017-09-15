@@ -13,6 +13,7 @@ import java.util.Map;
 
 /**
  * Wrapper for mongo result
+ *
  * @author Igor Shestakov.
  */
 public class MongoCountMembersResult extends MongoAbstractResult implements MongoResult
@@ -21,12 +22,24 @@ public class MongoCountMembersResult extends MongoAbstractResult implements Mong
 
 	public MongoCountMembersResult(final CountMembersMixedQuery query, Document result, MongoDatabase database) throws MongoSQLException
 	{
-		super(result, database, Integer.MAX_VALUE-1, null, false);
+		super(result,
+				  database,
+				  null,
+				  false,
+				  new MongoExecutionOptions.MongoExecutionOptionsBuilder()
+							 .batchSize(1)
+							 .samplingBatchSize(1)
+							 .maxRows(1)
+							 .createOptions()
+		);
 
 		this.query = query;
 
 		fields = new ArrayList<>();
-		fields.add(new MongoField(Types.BIGINT, Long.class, new ArrayList<String>(){{add(query.getResultFieldName());}}));
+		fields.add(new MongoField(Types.BIGINT, Long.class, new ArrayList<String>()
+		{{
+				add(query.getResultFieldName());
+			}}));
 
 		//create fake document
 		int docCount = (this.documentList != null) ? this.documentList.size() : 0;

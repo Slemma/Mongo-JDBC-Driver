@@ -7,15 +7,13 @@ import com.mongodb.client.ListCollectionsIterable;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.MongoIterable;
 import com.slemma.jdbc.query.MongoBasicResult;
+import com.slemma.jdbc.query.MongoExecutionOptions;
 import com.slemma.jdbc.query.MongoResult;
 import org.apache.commons.lang3.StringUtils;
 import org.bson.Document;
 import org.slf4j.LoggerFactory;
 
-import java.sql.DatabaseMetaData;
-import java.sql.ResultSet;
-import java.sql.RowIdLifetime;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -391,16 +389,24 @@ class MongoDatabaseMetadata implements DatabaseMetaData
 				if (StringUtils.isNotEmpty(tableNamePattern) && !collectionName.equals(tableNamePattern))
 					continue;
 
+				int batchSize = MongoDriverProperty.BATCH_SIZE.getInt(connection.getProperties());
+
 				String query = "{ " +
 						  "\"find\" : \"" + collectionName + "\"" +
-						  ", \"limit\" : 50" +
-						  ", \"batchSize\" : 50" +
+						  ", \"limit\" : " + batchSize +
+						  ", \"batchSize\" : " + batchSize +
 						  "}";
 
 				Document command = Document.parse(query);
 				try
 				{
-					MongoResult mResult = new MongoBasicResult(db.runCommand(command), db, Integer.MAX_VALUE - 1);
+					MongoExecutionOptions eOptions = new MongoExecutionOptions.MongoExecutionOptionsBuilder()
+							  .batchSize(batchSize)
+							  .samplingBatchSize(batchSize)
+							  .maxRows(batchSize)
+							  .createOptions();
+
+					MongoResult mResult = new MongoBasicResult(db.runCommand(command), db, eOptions);
 					for (MongoField field : mResult.getFields())
 					{
 						String[] columnMetadata = new String[resulSetColumnCount];

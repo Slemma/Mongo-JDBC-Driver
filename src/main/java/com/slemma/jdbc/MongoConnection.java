@@ -35,6 +35,8 @@ public class MongoConnection implements Connection
 
 	private final String database;
 
+	private Properties properties;
+
 	/**
 	 * List to contain sql warnings in
 	 */
@@ -49,6 +51,9 @@ public class MongoConnection implements Connection
 	 */
 	public MongoConnection(String url, Properties info) throws SQLException
 	{
+		this.url = url;
+		this.properties = info;
+
 		MongoClientOptions.Builder optionsBuilder = MongoClientOptions.builder();
 		if (info != null) {
 			if (info.containsKey("connectTimeout") && info.get("connectTimeout") != null ) {
@@ -59,7 +64,6 @@ public class MongoConnection implements Connection
 		}
 		MongoClientURI mongoURI = new MongoClientURI(url, optionsBuilder);
 		this.mongoClient = new MongoClient(mongoURI);
-		this.url = url;
 		if (mongoURI.getDatabase() != null)
 			this.database = mongoURI.getDatabase();
 		else
@@ -874,6 +878,11 @@ public class MongoConnection implements Connection
 	public int getNetworkTimeout() throws SQLException
 	{
 		throw new UnsupportedOperationException();
+	}
+
+	public Properties getProperties()
+	{
+		return properties;
 	}
 
 	public class AbortCommand implements Runnable

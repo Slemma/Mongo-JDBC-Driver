@@ -1,7 +1,6 @@
 package com.slemma.jdbc;
 
-import com.mongodb.MongoClient;
-import com.mongodb.client.MongoDatabase;
+import com.slemma.jdbc.query.MongoExecutionOptions;
 import com.slemma.jdbc.query.MongoQuery;
 import com.slemma.jdbc.query.MongoQueryExecutor;
 import com.slemma.jdbc.query.MongoQueryParser;
@@ -9,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Properties;
 
 /**
  * @author Igor Shestakov.
@@ -65,7 +65,15 @@ public class MongoStatement extends AbstractMongoStatement implements java.sql.S
 //		MongoDatabase database = mongoClient.getDatabase(this.connection.getDatabase());
 		MongoQuery mongoQuery = MongoQueryParser.parse(query);
 		MongoQueryExecutor executor = new MongoQueryExecutor(this.connection.getMongoClient());
-		return executor.run(this.connection.getDatabase(), mongoQuery, this);
+
+		Properties connectionProperties = this.connection.getProperties();
+		MongoExecutionOptions eOptions = new MongoExecutionOptions.MongoExecutionOptionsBuilder()
+				  .batchSize(MongoDriverProperty.BATCH_SIZE.getInt(connectionProperties))
+				  .samplingBatchSize(this.getFetchSize() != 0 ? this.getFetchSize() : MongoDriverProperty.BATCH_SIZE.getInt(connectionProperties))
+				  .maxRows(this.getMaxRows())
+				  .createOptions();
+
+		return executor.run(this.connection.getDatabase(), mongoQuery, this, eOptions);
 	}
 
 	//------------------------- for Jdk1.7 -----------------------------------

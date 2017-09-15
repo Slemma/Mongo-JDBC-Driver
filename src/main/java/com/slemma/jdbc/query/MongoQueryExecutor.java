@@ -24,14 +24,13 @@ public class MongoQueryExecutor
 		this.mongoClient = mongoClient;
 	}
 
-	public java.sql.ResultSet run(String databaseName, MongoQuery query, AbstractMongoStatement statement) throws SQLException{
-		return run(mongoClient.getDatabase(databaseName) , query, statement);
+	public java.sql.ResultSet run(String databaseName, MongoQuery query, AbstractMongoStatement statement, MongoExecutionOptions options) throws SQLException{
+		return run(mongoClient.getDatabase(databaseName) , query, statement, options);
 	}
 
-	public java.sql.ResultSet run(MongoDatabase database, MongoQuery query, AbstractMongoStatement statement) throws SQLException
+	public java.sql.ResultSet run(MongoDatabase database, MongoQuery query, AbstractMongoStatement statement, MongoExecutionOptions options) throws SQLException
 	{
 		MongoResult mongoResult =  null;
-
 		try
 		{
 			if (query instanceof CountMembersMixedQuery)
@@ -39,16 +38,15 @@ public class MongoQueryExecutor
 				mongoResult = new MongoCountMembersFakeResult((CountMembersMixedQuery) query, database);
 			} else if (query instanceof GetMembersMixedQuery) {
 				Document queryResult = database.runCommand(query.getMqlCommand());
-				mongoResult = new MongoGetMembersResult((GetMembersMixedQuery) query, queryResult, database, statement.getMaxRows());
+				mongoResult = new MongoGetMembersResult((GetMembersMixedQuery) query, queryResult, database, options);
 			} else if (query instanceof MongoQuery) {
-				int batchSize = statement.getFetchSize() != 0 ? statement.getFetchSize() : MongoAbstractResult.DEFAULT_BATCH_SIZE;
-				query.injectBatchSize(batchSize, true);
+				query.injectBatchSize(options.getBatchSize(), true);
 
 				Document queryResult = database.runCommand(query.getMqlCommand());
 				if (statement.getFetchDirection() == ResultSet.TYPE_SCROLL_INSENSITIVE)
-					mongoResult = new MongoBasicResult(queryResult, database, statement.getMaxRows());
+					mongoResult = new MongoBasicResult(queryResult, database, options);
 				else
-					mongoResult = new MongoForwardOnlyResult(queryResult, database, statement.getMaxRows(), batchSize);
+					mongoResult = new MongoForwardOnlyResult(queryResult, database, options);
 			} else {
 				throw new UnsupportedOperationException("Unhandled query type.");
 			}

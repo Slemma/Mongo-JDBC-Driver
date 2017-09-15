@@ -19,6 +19,7 @@ public class TestMetadata
 {
 
 	private static java.sql.Connection con = null;
+	private static Driver driver = null;
 	private static ResultSet Result = null;
 
 	private final static Logger logger = LoggerFactory.getLogger(TestMetadata.class.getName());
@@ -57,8 +58,11 @@ public class TestMetadata
 				try {
 					Class.forName("com.slemma.jdbc.MongoDriver");
 
-//					this.con = DriverManager.getConnection("jdbc:mongodb:mql://127.0.0.1:27017/test");
-					this.con = DriverManager.getConnection("jdbc:mongodb:mql://test:test@127.0.0.1:27017/test?&authMechanism=SCRAM-SHA-1");
+//					String jdbcUrl = "jdbc:mongodb:mql://127.0.0.1:27017/test";
+//					String jdbcUrl = "jdbc:mongodb:mql://test:test@127.0.0.1:27017/test?&authMechanism=SCRAM-SHA-1";
+					String jdbcUrl = "jdbc:mongodb:mql://admin:Qwerty123@127.0.0.1:27017/admin?&authMechanism=SCRAM-SHA-1";
+					this.con = DriverManager.getConnection(jdbcUrl);
+					this.driver = DriverManager.getDriver(jdbcUrl);
 				}
 				catch (Exception e) {
 					e.printStackTrace();
@@ -87,7 +91,7 @@ public class TestMetadata
 	@Test
 	public void connectionGetCatalog() {
 		try {
-			assertEquals(this.con.getCatalog(), "test");
+			assertEquals(this.con.getCatalog(), "admin");
 		}
 		catch (SQLException e) {
 			this.logger.error("SQL exception: " + e.toString());
@@ -240,4 +244,26 @@ public class TestMetadata
 		}
 	}
 
+	@Test
+	public void metadataGetDriverProperties() {
+		try
+		{
+			DriverPropertyInfo[] driverPropertyInfos = this.driver.getPropertyInfo("jdbc:mongodb:mql://admin:Qwerty123@127.0.0.1:27017/admin?&authMechanism=SCRAM-SHA-1", null);
+			assertEquals(5, driverPropertyInfos.length);
+			assertEquals("hosts", driverPropertyInfos[0].name);
+			assertEquals("127.0.0.1:27017", driverPropertyInfos[0].value);
+			assertEquals("database", driverPropertyInfos[1].name);
+			assertEquals("admin", driverPropertyInfos[1].value);
+			assertEquals("user", driverPropertyInfos[2].name);
+			assertEquals("admin", driverPropertyInfos[2].value);
+			assertEquals("password", driverPropertyInfos[3].name);
+			assertEquals("Qwerty123", driverPropertyInfos[3].value);
+			assertEquals("batch_size", driverPropertyInfos[4].name);
+			assertEquals("1000", driverPropertyInfos[4].value);
+		}
+		catch (SQLException e)
+		{
+			Assert.fail("Exception: " + e.toString());
+		}
+	}
 }

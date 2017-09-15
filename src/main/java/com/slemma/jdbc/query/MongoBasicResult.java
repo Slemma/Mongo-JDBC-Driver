@@ -18,8 +18,8 @@ import java.util.Map;
  */
 public class MongoBasicResult extends MongoAbstractResult implements MongoResult
 {
-	public MongoBasicResult(Document result, MongoDatabase database, int maxRows) throws MongoSQLException
+	public MongoBasicResult(Document result, MongoDatabase database, MongoExecutionOptions options) throws MongoSQLException
 	{
-		super(result, database, maxRows, null, false);
+		super(result, database, null, false, options);
 	}
 }

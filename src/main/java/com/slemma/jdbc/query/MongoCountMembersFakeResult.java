@@ -25,9 +25,13 @@ public class MongoCountMembersFakeResult extends MongoAbstractResult implements 
 							 new ArrayList<Document>() {{ add(new Document(query.getResultFieldName(), 0)); }}
 				  ),
 				  database,
-				  Integer.MAX_VALUE - 1,
 				  null,
-				  false
+				  false,
+				  new MongoExecutionOptions.MongoExecutionOptionsBuilder()
+							 .batchSize(1)
+							 .samplingBatchSize(1)
+							 .maxRows(1)
+							 .createOptions()
 		);
 
 

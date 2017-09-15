@@ -23,6 +23,9 @@ public class MongoQueryParser
 	{
 		String cleanedQuery = cleanQueryString(query);
 
+		if (cleanedQuery.isEmpty() || cleanedQuery.equals("{}"))
+			throw new MongoSQLException(String.format("No such command: '%s'", cleanedQuery));
+
 		Matcher m;
 
 		//try match count query

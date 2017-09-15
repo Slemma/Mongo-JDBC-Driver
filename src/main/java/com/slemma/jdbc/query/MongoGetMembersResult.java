@@ -36,12 +36,11 @@ public class MongoGetMembersResult extends MongoAbstractResult implements MongoR
 		}
 	}
 
-	public MongoGetMembersResult(final GetMembersMixedQuery query, Document result, MongoDatabase database, int maxRows) throws MongoSQLException
+	public MongoGetMembersResult(final GetMembersMixedQuery query, Document result, MongoDatabase database, MongoExecutionOptions options) throws MongoSQLException
 	{
 		super(
 				  result,
 				  database,
-				  maxRows,
 				  new DocumentTransformer()
 				  {
 					  @Override
@@ -65,13 +64,14 @@ public class MongoGetMembersResult extends MongoAbstractResult implements MongoR
 						  return transformedDoc;
 					  }
 				  },
-				  true
+				  true,
+				  options
 		);
 
 		this.query = query;
 
 		if (this.getDocumentCount() > 0) {
-			MongoFieldPredictor predictor = new MongoFieldPredictor(this.getDocumentList());
+			MongoFieldPredictor predictor = new MongoFieldPredictor(this.getDocumentList(), options.getSamplingBatchSize());
 			this.fields = predictor.getFields();
 		} else {
 			this.fields = new ArrayList<>();

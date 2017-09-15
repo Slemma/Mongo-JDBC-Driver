@@ -2,6 +2,7 @@ package com.slemma.jdbc;
 
 import org.bson.Document;
 
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -16,12 +17,13 @@ public class MongoFieldPredictor
 {
 	private final ArrayList<MongoField> fields = new ArrayList<>();
 
-	public static final int SAMPLING_BATCH_SIZE = 50;
-
-	public MongoFieldPredictor(ArrayList<Document> documents)
+	public MongoFieldPredictor(ArrayList<Document> documents, int samplingBatchSize)
 	{
 		if (documents == null)
 			throw new IllegalArgumentException("Documents list must be not null");
+
+		if (samplingBatchSize <= 0)
+			throw new IllegalArgumentException("SamplingBatchSize must be >0");
 
 		if (documents.size() > 0)
 		{
@@ -29,7 +31,7 @@ public class MongoFieldPredictor
 			//init fields
 			sampleMetadata(doc, fields, new ArrayList<String>());
 
-			int cntMax = (this.SAMPLING_BATCH_SIZE <= documents.size()) ? this.SAMPLING_BATCH_SIZE : documents.size();
+			int cntMax = (samplingBatchSize <= documents.size()) ? samplingBatchSize : documents.size();
 			//correction
 			for (int i = 1; i < cntMax; i++)
 			{
@@ -102,11 +104,15 @@ public class MongoFieldPredictor
 					{
 						int dataType = ConversionHelper.lookup(entry.getValue().getClass());
 						MongoField field = new MongoField(dataType, entry.getValue().getClass(), path);
-						if (ConversionHelper.sqlTypeExists(entry.getValue().getClass()))
-							fieldsList.add(field);
+						fieldsList.add(field);
 					}
 				}
-			} //TODO: implement else
+			}
+			else
+			{
+				MongoField field = new MongoField(Types.VARCHAR, String.class, path);
+				fieldsList.add(field);
+			}
 		}
 	}
 }

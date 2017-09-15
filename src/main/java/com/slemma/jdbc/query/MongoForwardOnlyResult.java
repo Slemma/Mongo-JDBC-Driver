@@ -18,14 +18,9 @@ public class MongoForwardOnlyResult extends MongoAbstractResult implements Mongo
 	boolean firstBatchFetched;
 	boolean lastBatch;
 
-	public MongoForwardOnlyResult(Document result, MongoDatabase database, int maxRows) throws MongoSQLException
+	public MongoForwardOnlyResult(Document result, MongoDatabase database, MongoExecutionOptions options) throws MongoSQLException
 	{
-		this(result, database, maxRows, DEFAULT_BATCH_SIZE);
-	}
-
-	public MongoForwardOnlyResult(Document result, MongoDatabase database, int maxRows, int batchSize) throws MongoSQLException
-	{
-		super(result, database, maxRows, null, false, batchSize);
+		super(result, database, null, false, options);
 	}
 
 	@Override
@@ -61,7 +56,10 @@ public class MongoForwardOnlyResult extends MongoAbstractResult implements Mongo
 				this.firstBatchFetched = true;
 
 				Long nextBatch = cursor.getLong("id");
-				this.lastBatch = (nextBatch == null || nextBatch == 0 || documentCount >= maxRows);
+				if (maxRows != 0)
+					this.lastBatch = (nextBatch == null || nextBatch == 0 || documentCount >= maxRows);
+				else
+					this.lastBatch = (nextBatch == null || nextBatch == 0);
 			}
 			else
 			{
@@ -84,7 +82,10 @@ public class MongoForwardOnlyResult extends MongoAbstractResult implements Mongo
 					nextBatch = nextCursor.getLong("id");
 					addDocuments((ArrayList<Document>) nextCursor.get("nextBatch"));
 
-					this.lastBatch = (nextBatch == null || nextBatch == 0 || documentCount >= maxRows);
+					if (maxRows != 0)
+						this.lastBatch = (nextBatch == null || nextBatch == 0 || documentCount >= maxRows);
+					else
+						this.lastBatch = (nextBatch == null || nextBatch == 0);
 				}
 				catch (Exception e)
 				{
@@ -99,7 +100,7 @@ public class MongoForwardOnlyResult extends MongoAbstractResult implements Mongo
 			this.lastBatch = true;
 		}
 
-		if (documentCount > maxRows)
+		if (maxRows !=0 && documentCount > maxRows)
 			this.documentList.subList(this.documentList.size() - (documentCount - maxRows), this.documentList.size()).clear();
 
 		return true;

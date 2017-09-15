@@ -29,7 +29,9 @@
 
 package com.slemma.jdbc;
 
+import com.mongodb.MongoClientOptions;
 import com.mongodb.MongoClientURI;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -156,9 +158,15 @@ public class MongoDriver implements java.sql.Driver
 
 		url = url.trim();
 
-//		Properties mergedProps = this.parseURL(url, info);
-//		url = url.replace(this.PREFIX, "mongodb:");
-//		return new MongoConnection(url, mergedProps);
+		DriverPropertyInfo[] driverProps = this.getPropertyInfo(url, info);
+		for (DriverPropertyInfo driverProp : driverProps)
+		{
+
+			if (!info.containsKey(driverProp.name))
+			{
+				info.setProperty(driverProp.name, driverProp.value);
+			}
+		}
 
 		url = url.replace(this.PREFIX, "mongodb:");
 		return new MongoConnection(url, info);
@@ -182,7 +190,8 @@ public class MongoDriver implements java.sql.Driver
 		return MongoDriver.MINOR_VERSION;
 	}
 
-	public static String getName() {
+	public static String getName()
+	{
 		return "com.slemma.mongo-jdbc  JDBC driver";
 	}
 
@@ -197,45 +206,25 @@ public class MongoDriver implements java.sql.Driver
 	@Override
 	public java.sql.DriverPropertyInfo[] getPropertyInfo(String url, Properties info) throws SQLException
 	{
+		Properties props = this.parseURL(url, info);
 
-		if (props == null)
+		MongoDriverProperty[] driverProperties = MongoDriverProperty.values();
+		DriverPropertyInfo[] result = new DriverPropertyInfo[driverProperties.length];
+		int index = 0;
+		for (MongoDriverProperty p : MongoDriverProperty.values())
 		{
-			props = new Properties();
+			String propValue = props.getProperty(p.name);
+			if (propValue == null)
+				propValue = p.defaultValue;
+
+			DriverPropertyInfo di = new DriverPropertyInfo(p.name, propValue);
+			di.choices = p.choices;
+			di.description = p.description;
+			di.required = false;
+			result[index++] = di;
 		}
 
-		DriverPropertyInfo host =
-				  new DriverPropertyInfo("host", props.getProperty("host"));
-		host.required = true;
-		host.description = "Host";
-
-		DriverPropertyInfo port =
-				  new DriverPropertyInfo("host", props.getProperty("port"));
-		host.required = true;
-		host.description = "Port";
-
-		DriverPropertyInfo database =
-				  new DriverPropertyInfo("database", props.getProperty("database"));
-		host.required = true;
-		host.description = "Database";
-
-		DriverPropertyInfo user =
-				  new DriverPropertyInfo("user", info.getProperty("user"));
-		user.required = false;
-		user.description = "Username to authenticate as";
-
-		DriverPropertyInfo password =
-				  new DriverPropertyInfo("password", info.getProperty("password"));
-		password.required = false;
-		password.description = "Password to use for authentication";
-
-		DriverPropertyInfo[] dpi = {
-				  host,
-				  port,
-				  database,
-				  user,
-				  password,
-		};
-		return dpi;
+		return result;
 	}
 
 	/**
@@ -261,221 +250,20 @@ public class MongoDriver implements java.sql.Driver
 	 */
 
 
-	Properties parseURL(String url, Properties defaults) throws java.sql.SQLException
+	public static Properties parseURL(String url, Properties defaults) throws java.sql.SQLException
 	{
+		if (url == null)
+			return null;
+
 		Properties urlProps = new Properties(defaults);
 
-//		String modifiedUrl = url.replace("jdbc:mongodb:mql://","mongodb://");
-//		MongoClientURI mU =  new MongoClientURI(modifiedUrl);
-	/*
-	  * Parse parameters after the ? in the URL and remove
-	 * them from the original URL.
-	 */
+		url = url.replace(PREFIX, "mongodb:");
+		MongoClientURI mongoURI = new MongoClientURI(url, MongoClientOptions.builder());
 
-		int index = url.indexOf("?");
-
-		if (index != -1)
-		{
-			String ParamString = url.substring(index + 1, url.length());
-			url = url.substring(0, index);
-
-			StringTokenizer queryParams = new StringTokenizer(ParamString, "&");
-
-			while (queryParams.hasMoreTokens())
-			{
-
-				StringTokenizer vp = new StringTokenizer(queryParams.nextToken(), "=");
-
-				String param = "";
-
-				if (vp.hasMoreTokens())
-					param = vp.nextToken();
-
-				String value = "";
-
-				if (vp.hasMoreTokens())
-					value = vp.nextToken();
-
-				if (value.length() > 0 && param.length() > 0)
-					urlProps.put(param, value);
-			}
-		}
-
-		StringTokenizer st = new StringTokenizer(url, ":/", true);
-
-		if (st.hasMoreTokens())
-		{
-			String protocol = st.nextToken();
-			if (protocol != null)
-			{
-				if (!protocol.toLowerCase().equals("jdbc"))
-					return null;
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for the colon following 'jdbc'
-		if (st.hasMoreTokens())
-		{
-			String Colon = st.nextToken();
-			if (Colon != null)
-			{
-				if (!Colon.equals(":"))
-					return null;
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for the colon following 'jdbc'
-		if (st.hasMoreTokens())
-		{
-			String proto = st.nextToken();
-			if (proto != null)
-			{
-				if (!proto.toLowerCase().equals(MongoDriver.PROTOCOL))
-					return null;
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for the colon following 'mongodb'
-		if (st.hasMoreTokens())
-		{
-			String Colon = st.nextToken();
-			if (Colon != null)
-			{
-				if (!Colon.equals(":"))
-					return null;
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for sub-protocol to be mql
-		if (st.hasMoreTokens())
-		{
-			String subProto = st.nextToken();
-			if (subProto != null)
-			{
-				if (!subProto.toLowerCase().equals(MongoDriver.SUB_PROTOCOL))
-					return null; // We only handle MongoDriver sub-protocol
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for the colon following sub protocol
-		if (st.hasMoreTokens())
-		{
-			String colon = st.nextToken();
-			if (colon != null)
-			{
-				if (!colon.equals(":"))
-					return null;
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for the "host" of the URL
-		if (st.hasMoreTokens())
-		{
-			String host = st.nextToken();
-			if (host != null)
-			{
-				if (host.equals("/"))
-				{
-					if (st.hasMoreTokens())
-					{
-						host = st.nextToken();
-						if (host != null)
-						{
-							if (host.equals("/"))
-							{
-								if (st.hasMoreTokens())
-								{
-									host = st.nextToken();
-									if (host == null)
-										return null;
-								}
-								else
-									return null;
-							}
-							else
-								return null;
-						}
-						else
-							return null;
-					}
-					else
-						return null;
-				}
-				urlProps.put("host", host);
-			}
-			else
-				return null;
-		}
-		else
-			return null;
-
-		// Look for the "port" of the URL
-		if (st.hasMoreTokens())
-		{
-			String afterHostToken = st.nextToken();
-			if (afterHostToken.equals(":"))
-			{
-				//extract port
-				if (st.hasMoreTokens())
-				{
-					String portStr = st.nextToken();
-					try
-					{
-						urlProps.put("port", Integer.parseInt(portStr));
-					}
-					catch (NumberFormatException ex)
-					{
-						return null;
-					}
-					if (st.hasMoreTokens()){
-						String afterPortToken = st.nextToken();
-						if (!afterPortToken.equals("/"))
-							return null;
-					}
-					else
-						return null;
-				}
-				else if (!afterHostToken.equals("/"))
-				{
-					return null;
-				}
-			}
-		}
-		else
-			return null;
-
-		// Look for the "database" of the URL
-		if (st.hasMoreTokens())
-		{
-			String database = st.nextToken();
-			urlProps.put("database", database);
-		}
-		else
-			return null;
+		urlProps.setProperty(MongoDriverProperty.HOSTS.name, StringUtils.join(mongoURI.getHosts(), ","));
+		urlProps.setProperty(MongoDriverProperty.DATABASE.name, mongoURI.getDatabase());
+		urlProps.setProperty(MongoDriverProperty.USER.name, mongoURI.getUsername());
+		urlProps.setProperty(MongoDriverProperty.PASSWORD.name, String.valueOf(mongoURI.getPassword()));
 
 		return urlProps;
 	}
