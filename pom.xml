@@ -6,7 +6,7 @@
 
     <groupId>com.slemma</groupId>
     <artifactId>mongo-jdbc</artifactId>
-    <version>1.0.18</version>
+    <version>1.0.19</version>
     <name>Mongodb over JDBC</name>
     <description>A simple JDBC driver, to reach MongoDb</description>
 

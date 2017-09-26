@@ -260,10 +260,14 @@ public class MongoDriver implements java.sql.Driver
 		url = url.replace(PREFIX, "mongodb:");
 		MongoClientURI mongoURI = new MongoClientURI(url, MongoClientOptions.builder());
 
-		urlProps.setProperty(MongoDriverProperty.HOSTS.name, StringUtils.join(mongoURI.getHosts(), ","));
-		urlProps.setProperty(MongoDriverProperty.DATABASE.name, mongoURI.getDatabase());
-		urlProps.setProperty(MongoDriverProperty.USER.name, mongoURI.getUsername());
-		urlProps.setProperty(MongoDriverProperty.PASSWORD.name, String.valueOf(mongoURI.getPassword()));
+		if (mongoURI.getHosts().size()>0)
+			urlProps.setProperty(MongoDriverProperty.HOSTS.name, StringUtils.join(mongoURI.getHosts(), ","));
+		if (mongoURI.getDatabase() != null)
+			urlProps.setProperty(MongoDriverProperty.DATABASE.name, mongoURI.getDatabase());
+		if (mongoURI.getUsername() != null)
+			urlProps.setProperty(MongoDriverProperty.USER.name, mongoURI.getUsername());
+		if (mongoURI.getPassword() != null)
+			urlProps.setProperty(MongoDriverProperty.PASSWORD.name, String.valueOf(mongoURI.getPassword()));
 
 		return urlProps;
 	}
