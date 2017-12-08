@@ -364,7 +364,7 @@ class COLResultSetMetadata implements java.sql.ResultSetMetaData {
 /**
  * This class implements the java.sql.ResultSet interface for Object[]
  */
-public class DMDResultSet extends ScrollableResultset<Object> implements
+public class DMDResultSet extends MongoScrollableResultSet implements
 		  java.sql.ResultSet {
 
 	/** enum declaration that manages function call identity */
@@ -390,7 +390,9 @@ public class DMDResultSet extends ScrollableResultset<Object> implements
 	 *            names of columns
 	 */
 	public DMDResultSet(Object[] objects, String[] colnames,
-							  DMDResultSetType type) {
+							  DMDResultSetType type) throws SQLException
+	{
+		super(null, null);
 		this.RowsofResult = objects;
 		this.Colnames = colnames;
 		this.ResultsetType = type;
@@ -590,19 +592,5 @@ public class DMDResultSet extends ScrollableResultset<Object> implements
 				}
 			}
 		}
-	}
-
-	//------------------------- for Jdk1.7 -----------------------------------
-
-	/** {@inheritDoc} */
-	@Override
-	public <T> T getObject(int columnIndex, Class<T> type) throws SQLException {
-		return null;
-	}
-
-	/** {@inheritDoc} */
-	@Override
-	public <T> T getObject(String columnLabel, Class<T> type) throws SQLException {
-		return null;
 	}
 }

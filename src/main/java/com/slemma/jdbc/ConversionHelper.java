@@ -3,9 +3,9 @@ package com.slemma.jdbc;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.sql.Types;
-import java.util.Calendar;
-import java.util.HashMap;
-import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
 /**
  * ConversionHelper defines mappings from common Java types to
@@ -15,7 +15,8 @@ public class ConversionHelper
 {
 	private static final Map<Class, Integer> javaToSqlRules;
 	private static final Map<Integer, Integer> typeUniversality;
-
+//	public  static final SimpleDateFormat TIMESTAMP_TZ_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss Z");
+	public  static final SimpleDateFormat TIMESTAMP_TZ_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSZ");
 	static
 	{
 		javaToSqlRules = new HashMap<Class, Integer>();
@@ -187,8 +188,26 @@ public class ConversionHelper
 			return (java.sql.Date)value;
 	}
 
-
 	public static java.sql.Date getValueAsDate(Object value) {
 		return getValueAsDate(value, null);
 	}
+
+
+	public static java.sql.Timestamp getValueAsTimestamp(Object value, Calendar cal) {
+		if (value == null)
+			return null;
+
+		cal.setTimeInMillis(((java.util.Date) value).getTime());
+		return new Timestamp(cal.getTimeInMillis());
+	}
+
+	public static java.sql.Timestamp getValueAsTimestamp(Object value) {
+		return getValueAsTimestamp(value, getCalendar("UTC"));
+	}
+
+	public static Calendar getCalendar(String timeZone)
+	{
+		return Calendar.getInstance(TimeZone.getTimeZone(timeZone), new Locale("ru"));
+	}
+
 }

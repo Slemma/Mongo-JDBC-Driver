@@ -31,7 +31,7 @@ public class Utils
 
 	public static int printResultSet(ResultSet rs, Boolean printRowNumber){
 
-		final int columnWidth = 10;
+		final int columnWidth = 26;
 		Integer counter=0;
 
 		ArrayList<String> columnNames = new ArrayList<>();

@@ -1,5 +1,7 @@
 package com.slemma.jdbc;
 
+import com.slemma.jdbc.query.MongoResult;
+import org.bson.Document;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
@@ -7,35 +9,100 @@ import java.math.BigDecimal;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Map;
+import java.util.TimeZone;
 
 /**
- * @author Igor Shestakov.
+ * @author igorshestakov.
  */
+public class BaseResultSet implements java.sql.ResultSet
+{
+	private final static org.slf4j.Logger logger = LoggerFactory.getLogger(BaseResultSet.class.getName());
 
-abstract class ScrollableResultset<T> implements java.sql.ResultSet {
+	/**
+	 * Paging size, the original result will be paged by FETCH_SIZE rows
+	 */
+	//TODO: sync with mongo batch size
+	protected int FETCH_SIZE = 5000;
 
-	private final static org.slf4j.Logger logger = LoggerFactory.getLogger(ScrollableResultset.class.getName());
+	protected MongoResult mongoResult;
 
-	/** Reference for holding the current InputStream given back by get methods */
+	/**
+	 * Reference for holding the current InputStream given back by get methods
+	 */
 	protected InputStream Strm = null;
 
-	/** The boolean that holds if the last get has given back null or not */
+	/**
+	 * The boolean that holds if the last get has given back null or not
+	 */
 	protected boolean wasnull = false;
 
-	/** The Array which get iterated with cursor */
-	protected T[] RowsofResult;
+	/**
+	 * The Array which get iterated with cursor it's size can be set with FETCH_SIZE
+	 */
+	protected Object[] RowsofResult;
 
-	/** This holds the current position of the cursor */
-	protected int Cursor = -1;
-	/** This holds if the resultset is closed or not */
+	/**
+	 * This holds if the resultset is closed or not
+	 */
 	protected Boolean Closed = false;
 
+	/**
+	 * Are we at the first row?
+	 */
+	protected boolean AT_FIRST = true;
+	/**
+	 * REference for the original statement which created this resultset
+	 */
+	protected Statement Statementreference;
+
+	/** First page of the Results */
+	/**
+	 * Cursor position which goes from -1 to FETCH_SIZE then 0 to FETCH_SIZE
+	 * The -1 is needed because of the while(mongoResult.next() == true) { } iterating method
+	 */
+	protected int Cursor = -1;
+
+	public BaseResultSet(MongoResult mongoResult
+			  , AbstractMongoStatement mongoStatementRoot) throws SQLException
+	{
+		this.mongoResult = mongoResult;
+		this.Statementreference = (Statement) mongoStatementRoot;
+
+		if (this.mongoResult == null)
+		{
+			this.RowsofResult = null;
+		}
+		else if (this.mongoResult.getDocumentCount() == 0)
+		{
+			this.RowsofResult = null;
+		}
+		else
+		{
+			this.RowsofResult = this.mongoResult.asArray();
+		}
+	}
+
+	protected MongoConnection getConnection() throws SQLException
+	{
+		return (MongoConnection)this.Statementreference.getConnection();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public boolean isClosed() throws SQLException
+	{
+		return this.Closed;
+	}
 
 	protected void throwIfClosed() throws SQLException
 	{
-		if (this.isClosed()) {
+		if (this.isClosed())
+		{
 			throw new SQLException("This Resultset is Closed");
 		}
 	}
@@ -49,108 +116,115 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	protected void throwIfInvalidIndex(int columnIndex) throws SQLException
 	{
 		if (this.getMetaData().getColumnCount() < columnIndex
-				  || columnIndex < 1) {
+				  || columnIndex < 1)
+		{
 			throw new SQLException("ColumnIndex is not valid");
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * Returns the current rows Object at the given index
+	 *
+	 * @param columnIndex - the column to be used
+	 * @return - the stored value parsed to String, Float etc
+	 * @throws SQLException - if the resultset is closed or the columnIndex is not valid, or the type is unsupported
+	 */
+	public Object getObject(int columnIndex) throws SQLException
+	{
+		this.closestrm();
+
+		throwIfClosedOrInvalid();
+		throwIfInvalidIndex(columnIndex);
+
+		Document doc = (Document) this.RowsofResult[this.Cursor];
+		MongoField field = ((MongoResultsetMetaData) this.getMetaData()).mongoResult.getFields().get(columnIndex - 1);
+		ArrayList<String> path = field.getPath();
+		for (int i = 0; i < path.size() - 1; i++)
+		{
+			doc = (Document) doc.get(path.get(i));
+		}
+
+		return ConversionHelper.getValueAsObject(field.getType(), doc.get(path.get(path.size() - 1)));
+	}
+
+	@Override
+	/**
+	 * Returns the current rows Data at the given index as String
+	 * @param columnIndex - the column to be used
+	 * @return - the stored value parsed to String
+	 * @throws SQLException - if the resultset is closed or the columnIndex is not valid, or the type is unsupported
+	 */
+	public String getString(int columnIndex) throws SQLException
+	{
+		this.closestrm();
+
+		throwIfClosedOrInvalid();
+		throwIfInvalidIndex(columnIndex);
+
+		Document doc = (Document) this.RowsofResult[this.Cursor];
+		MongoField field = ((MongoResultsetMetaData) this.getMetaData()).mongoResult.getFields().get(columnIndex - 1);
+		ArrayList<String> path = field.getPath();
+		for (int i = 0; i < path.size() - 1; i++)
+		{
+			doc = (Document) doc.get(path.get(i));
+		}
+
+		Object data = doc.get(path.get(path.size() - 1));
+
+		if (data == null)
+		{
+			this.wasnull = true;
+			return null;
+		}
+		else
+		{
+			this.wasnull = false;
+			if (data.getClass().getName().equals("java.util.Date"))
+			{
+				String timeZone = this.getConnection().getTimeZone();
+				ConversionHelper.TIMESTAMP_TZ_FORMAT.setTimeZone(TimeZone.getTimeZone(timeZone));
+				return ConversionHelper.TIMESTAMP_TZ_FORMAT.format(data);
+			}
+			else
+			{
+				return data.toString();
+			}
+		}
+	}
+
+	/**
+	 * Not supported in forward only resultset
+	 *
+	 * @param row
+	 * @return - SQLException
+	 * @throws SQLException - this isn't a forward only resultset
+	 */
 	@Override
 	public boolean absolute(int row) throws SQLException
 	{
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null) {
-			return false;
-		}
-		if (row > 0) {
-			if (row <= this.RowsofResult.length) {
-				this.Cursor = row - 1;
-				return true;
-			}
-			else {
-				// An attempt to position the cursor beyond the first/last row
-				// in the result set leaves the cursor before the first row or
-				// after the last row.
-				this.Cursor = this.RowsofResult.length;
-				// false if the cursor is before the first row or after the last
-				// row
-				return false;
-			}
-		}
-		// If the given row number is negative, the cursor moves to an absolute
-		// row position with respect to the end of the result set.
-		else
-		if (row < 0) {
-			if (Math.abs(row) <= this.RowsofResult.length) {
-				this.Cursor = this.RowsofResult.length + row;
-				return true;
-			}
-			else {
-				// An attempt to position the cursor beyond the first/last
-				// row
-				// in the result set leaves the cursor before the first row
-				// or
-				// after the last row.
-				this.Cursor = -1;
-				// false if the cursor is before the first row or after the
-				// last
-				// row
-				return false;
-			}
-		}
-		// if 0
-		else {
-                /*
-                 * //Check if cursor is before first of after last row if
-                 * (this.Cursor == RowsofResult.size() || this.Cursor == -1)
-                 * return
-                 * false; else return true;
-                 */
-			if (this.Cursor == this.RowsofResult.length
-					  || this.Cursor == -1) {
-				return false;
-			}
-			else {
-				this.Cursor = -1;
-			}
-			return false;
-		}
+		throw new SQLException("The Type of the Resultset is TYPE_FORWARD_ONLY, absolute is not supported");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * Not supported in forward only resultset
+	 *
+	 * @throws SQLException - this isn't a forward only resultset
+	 */
 	@Override
-	public void afterLast() throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null) {
-			return;
-		}
-		if (this.RowsofResult.length > 0) {
-			this.Cursor = this.RowsofResult.length;
-		}
+	public void afterLast() throws SQLException
+	{
+		throw new SQLException("The Type of the Resultset is TYPE_FORWARD_ONLY, afterLast is not supported");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * Not supported in forward only resultset
+	 *
+	 * @throws SQLException - this isn't a forward only resultset
+	 */
 	@Override
-	public void beforeFirst() throws SQLException {
-		throwIfClosed();
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		if (this.RowsofResult == null) {
-			return;
-		}
-		if (this.RowsofResult.length > 0) {
-			this.Cursor = -1;
-		}
+	public void beforeFirst() throws SQLException
+	{
+		throw new SQLException("The Type of the Resultset is TYPE_FORWARD_ONLY, beforeFirst is not supported");
 	}
 
 	/**
@@ -162,7 +236,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public void cancelRowUpdates() throws SQLException {
+	public void cancelRowUpdates() throws SQLException
+	{
 		throw new UnsupportedOperationException("cancelWorUpdates()");
 	}
 
@@ -173,13 +248,18 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * </p>
 	 */
 	@Override
-	public void clearWarnings() throws SQLException {
+	public void clearWarnings() throws SQLException
+	{
 		throwIfClosed();
+		//TODO  implement warnings
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * Closes the resultset this function never FAILS!
+	 */
 	@Override
-	public void close() throws SQLException {
+	public void close() throws SQLException
+	{
 		// TODO free occupied resources
 		this.Closed = true;
 		this.RowsofResult = null;
@@ -189,15 +269,18 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * If the Strm reference is not null it closes the underlying stream, if an
 	 * error occurs throws SQLException</p>
 	 *
-	 * @throws SQLException
-	 *             if error occurs while trying to close the stream
+	 * @throws SQLException if error occurs while trying to close the stream
 	 */
-	protected void closestrm() throws SQLException {
-		if (this.Strm != null) {
-			try {
+	protected void closestrm() throws SQLException
+	{
+		if (this.Strm != null)
+		{
+			try
+			{
 				this.Strm.close();
 			}
-			catch (IOException e) {
+			catch (IOException e)
+			{
 				throw new SQLException(e);
 			}
 		}
@@ -212,9 +295,9 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void deleteRow() throws SQLException {
+	public void deleteRow() throws SQLException
+	{
 		throw new UnsupportedOperationException("deleteRow()");
-
 	}
 
 	/**
@@ -226,25 +309,34 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public int findColumn(String columnLabel) throws SQLException {
-		throw new SQLException("Not implemented." + "findColumn(string)");
+	public int findColumn(String columnLabel) throws SQLException
+	{
+		if (this.isClosed())
+		{
+			throw new SQLException("This Resultset is Closed");
+		}
+		int columnCount = this.getMetaData().getColumnCount();
+		for (int i = 1; i <= columnCount; i++)
+		{
+			if (this.getMetaData().getColumnLabel(i).equals(columnLabel))
+			{
+				return i;
+			}
+		}
+		throw new SQLException("No Such column labeled: " + columnLabel);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * Not supported in forward only resultset
+	 *
+	 * @return - SQLException
+	 * @throws SQLException - this isn't a forward only resultset
+	 */
 	@Override
-	public boolean first() throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null || this.RowsofResult.length == 0) {
-			return false;
-		}
-		else {
-			this.Cursor = 0;
-			return true;
-		}
+	public boolean first() throws SQLException
+	{
+		throw new SQLException(
+				  "The Type of the Resultset is TYPE_FORWARD_ONLY");
 	}
 
 	/**
@@ -256,7 +348,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Array getArray(int columnIndex) throws SQLException {
+	public Array getArray(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException("getArray(int)");
 	}
 
@@ -269,28 +362,36 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Array getArray(String columnLabel) throws SQLException {
+	public Array getArray(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException("getArray(string)");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public InputStream getAsciiStream(int columnIndex) throws SQLException {
+	public InputStream getAsciiStream(int columnIndex) throws SQLException
+	{
 		this.closestrm();
 		java.io.InputStream inptstrm;
 		String Value = this.getString(columnIndex);
-		if (Value == null) {
+		if (Value == null)
+		{
 			this.wasnull = true;
 			this.Strm = null;
 			return this.Strm;
 		}
-		else {
+		else
+		{
 			this.wasnull = false;
-			try {
+			try
+			{
 				inptstrm = new java.io.ByteArrayInputStream(
 						  Value.getBytes("US-ASCII"));
 			}
-			catch (UnsupportedEncodingException e) {
+			catch (UnsupportedEncodingException e)
+			{
 				throw new SQLException(e);
 			}
 			this.Strm = inptstrm;
@@ -298,24 +399,31 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public InputStream getAsciiStream(String columnLabel) throws SQLException {
+	public InputStream getAsciiStream(String columnLabel) throws SQLException
+	{
 		this.closestrm();
 		java.io.InputStream inptstrm;
 		String Value = this.getString(columnLabel);
-		if (Value == null) {
+		if (Value == null)
+		{
 			this.wasnull = true;
 			this.Strm = null;
 			return this.Strm;
 		}
-		else {
+		else
+		{
 			this.wasnull = false;
-			try {
+			try
+			{
 				inptstrm = new java.io.ByteArrayInputStream(
 						  Value.getBytes("US-ASCII"));
 			}
-			catch (UnsupportedEncodingException e) {
+			catch (UnsupportedEncodingException e)
+			{
 				throw new SQLException(e);
 			}
 			this.Strm = inptstrm;
@@ -323,92 +431,119 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public BigDecimal getBigDecimal(int columnIndex) throws SQLException {
+	public BigDecimal getBigDecimal(int columnIndex) throws SQLException
+	{
 
 		String coltype = this.getMetaData().getColumnTypeName(columnIndex);
-		if (coltype.equals("STRING")) {
+		if (coltype.equals("STRING"))
+		{
 			String Value = this.getString(columnIndex);
-			if (this.wasNull()) {
+			if (this.wasNull())
+			{
 				return null;
 			}
-			else {
-				try {
+			else
+			{
+				try
+				{
 					return new java.math.BigDecimal(Value);
 				}
-				catch (NumberFormatException e) {
+				catch (NumberFormatException e)
+				{
 					throw new SQLException(e);
 				}
 			}
 		}
-		else
-		if (coltype.equals("INTEGER")) {
+		else if (coltype.equals("INTEGER"))
+		{
 			int Value = this.getInt(columnIndex);
-			if (this.wasNull()) {
+			if (this.wasNull())
+			{
 				return null;
 			}
-			else {
+			else
+			{
 				return new java.math.BigDecimal(Value);
 			}
 
 		}
-		else
-		if (coltype.equals("FLOAT")) {
+		else if (coltype.equals("FLOAT"))
+		{
 			Float Value = this.getFloat(columnIndex);
-			if (this.wasNull()) {
+			if (this.wasNull())
+			{
 				return null;
 			}
-			else {
+			else
+			{
 				return new java.math.BigDecimal(Value);
 			}
 		}
-		else
-		if (coltype.equals("BOOLEAN")) {
+		else if (coltype.equals("BOOLEAN"))
+		{
 			throw new NumberFormatException(
 					  "Cannot format Boolean to BigDecimal");
 		}
-		else {
+		else
+		{
 			throw new NumberFormatException("Undefined format");
 		}
 	}
 
 	// Implemented Get functions Using Cursor
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
 	public BigDecimal getBigDecimal(int columnIndex, int scale)
-			  throws SQLException {
+			  throws SQLException
+	{
 		return this.getBigDecimal(columnIndex).setScale(scale);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public BigDecimal getBigDecimal(String columnLabel) throws SQLException {
+	public BigDecimal getBigDecimal(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getBigDecimal(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
 	public BigDecimal getBigDecimal(String columnLabel, int scale)
-			  throws SQLException {
+			  throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getBigDecimal(columnIndex, scale);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public InputStream getBinaryStream(int columnIndex) throws SQLException {
+	public InputStream getBinaryStream(int columnIndex) throws SQLException
+	{
 		this.closestrm();
 		java.io.InputStream inptstrm;
 		String Value = this.getString(columnIndex);
-		if (Value == null) {
+		if (Value == null)
+		{
 			this.wasnull = true;
 			this.Strm = null;
 			return this.Strm;
 		}
-		else {
+		else
+		{
 			this.wasnull = false;
 			inptstrm = new java.io.ByteArrayInputStream(Value.getBytes());
 			this.Strm = inptstrm;
@@ -416,18 +551,23 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public InputStream getBinaryStream(String columnLabel) throws SQLException {
+	public InputStream getBinaryStream(String columnLabel) throws SQLException
+	{
 		this.closestrm();
 		java.io.InputStream inptstrm;
 		String Value = this.getString(columnLabel);
-		if (Value == null) {
+		if (Value == null)
+		{
 			this.wasnull = true;
 			this.Strm = null;
 			return this.Strm;
 		}
-		else {
+		else
+		{
 			this.wasnull = false;
 			inptstrm = new java.io.ByteArrayInputStream(Value.getBytes());
 			this.Strm = inptstrm;
@@ -444,9 +584,9 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Blob getBlob(int columnIndex) throws SQLException {
+	public Blob getBlob(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException("getBlob(int)");
-
 	}
 
 	/**
@@ -458,98 +598,135 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Blob getBlob(String columnLabel) throws SQLException {
+	public Blob getBlob(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException("getBlob(string)");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean getBoolean(int columnIndex) throws SQLException {
+	public boolean getBoolean(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return false;
 		}
-		else {
+		else
+		{
 			return Boolean.parseBoolean(Value);
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean getBoolean(String columnLabel) throws SQLException {
+	public boolean getBoolean(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getBoolean(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public byte getByte(int columnIndex) throws SQLException {
+	public byte getByte(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return 0;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return Byte.parseByte(Value);
 			}
-			catch (NumberFormatException e) {
+			catch (NumberFormatException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public byte getByte(String columnLabel) throws SQLException {
+	public byte getByte(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getByte(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public byte[] getBytes(int columnIndex) throws SQLException {
+	public byte[] getBytes(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return null;
 		}
-		else {
+		else
+		{
 			return Value.getBytes();
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public byte[] getBytes(String columnLabel) throws SQLException {
+	public byte[] getBytes(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getBytes(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Reader getCharacterStream(int columnIndex) throws SQLException {
+	public Reader getCharacterStream(int columnIndex) throws SQLException
+	{
 		this.closestrm();
 		String Value = this.getString(columnIndex);
-		if (Value == null) {
+		if (Value == null)
+		{
 			this.wasnull = true;
 			return null;
 		}
-		else {
+		else
+		{
 			this.wasnull = false;
 			Reader rdr = new StringReader(Value);
 			return rdr;
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Reader getCharacterStream(String columnLabel) throws SQLException {
+	public Reader getCharacterStream(String columnLabel) throws SQLException
+	{
 		this.closestrm();
 		String Value = this.getString(columnLabel);
-		if (Value == null) {
+		if (Value == null)
+		{
 			this.wasnull = true;
 			return null;
 		}
-		else {
+		else
+		{
 			this.wasnull = false;
 			Reader rdr = new StringReader(Value);
 			return rdr;
@@ -565,7 +742,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Clob getClob(int columnIndex) throws SQLException {
+	public Clob getClob(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException("getClob(int)");
 	}
 
@@ -578,7 +756,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Clob getClob(String columnLabel) throws SQLException {
+	public Clob getClob(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException("getClob(string)");
 	}
 
@@ -591,8 +770,12 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @return ResultSet.CONCUR_READ_ONLY
 	 */
 	@Override
-	public int getConcurrency() throws SQLException {
-		throwIfClosed();
+	public int getConcurrency() throws SQLException
+	{
+		if (this.isClosed())
+		{
+			throw new SQLException("This Resultset is Closed");
+		}
 		return ResultSet.CONCUR_READ_ONLY;
 	}
 
@@ -605,56 +788,120 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public String getCursorName() throws SQLException {
+	public String getCursorName() throws SQLException
+	{
 		throw new UnsupportedOperationException("getCursorName()");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Date getDate(int columnIndex) throws SQLException {
+	public Date getDate(int columnIndex) throws SQLException
+	{
 		return ConversionHelper.getValueAsDate(this.getObject(columnIndex));
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Date getDate(int columnIndex, Calendar cal) throws SQLException {
+	public Date getDate(int columnIndex, Calendar cal) throws SQLException
+	{
 		return ConversionHelper.getValueAsDate(this.getObject(columnIndex), cal);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Date getDate(String columnLabel) throws SQLException {
+	public Date getDate(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getDate(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Date getDate(String columnLabel, Calendar cal) throws SQLException {
+	public Date getDate(String columnLabel, Calendar cal) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getDate(columnIndex, cal);
 	}
 
-	/** {@inheritDoc} */
+
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public double getDouble(int columnIndex) throws SQLException {
+	public Timestamp getTimestamp(int columnIndex) throws SQLException
+	{
+		return ConversionHelper.getValueAsTimestamp(this.getObject(columnIndex));
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public Timestamp getTimestamp(int columnIndex, Calendar cal)
+			  throws SQLException
+	{
+		return ConversionHelper.getValueAsTimestamp(this.getObject(columnIndex), cal);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public Timestamp getTimestamp(String columnLabel) throws SQLException
+	{
+		int columnIndex = this.findColumn(columnLabel);
+		return this.getTimestamp(columnIndex);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public Timestamp getTimestamp(String columnLabel, Calendar cal)
+			  throws SQLException
+	{
+		int columnIndex = this.findColumn(columnLabel);
+		return this.getTimestamp(columnIndex, cal);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public double getDouble(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return 0;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return Double.parseDouble(Value);
 			}
-			catch (NumberFormatException e) {
+			catch (NumberFormatException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public double getDouble(String columnLabel) throws SQLException {
+	public double getDouble(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getDouble(columnIndex);
 	}
@@ -668,8 +915,9 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public int getFetchDirection() throws SQLException {
-		throw new SQLException("Not implemented." + "getFetchDirection()");
+	public int getFetchDirection() throws SQLException
+	{
+		return ResultSet.FETCH_FORWARD;
 	}
 
 	/**
@@ -681,30 +929,42 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public int getFetchSize() throws SQLException {
-		throw new SQLException("Not implemented." + "getfetchSize()");
+	public int getFetchSize() throws SQLException
+	{
+		//throw new SQLException("Not implemented." + "getfetchSize()");
+		return FETCH_SIZE;
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public float getFloat(int columnIndex) throws SQLException {
+	public float getFloat(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return 0;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return Float.parseFloat(Value);
 			}
-			catch (NumberFormatException e) {
+			catch (NumberFormatException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public float getFloat(String columnLabel) throws SQLException {
+	public float getFloat(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getFloat(columnIndex);
 	}
@@ -718,54 +978,75 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @return CLOSE_CURSORS_AT_COMMIT
 	 */
 	@Override
-	public int getHoldability() throws SQLException {
+	public int getHoldability() throws SQLException
+	{
 		return ResultSet.CLOSE_CURSORS_AT_COMMIT;
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public int getInt(int columnIndex) throws SQLException {
+	public int getInt(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return 0;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return Integer.parseInt(Value);
 			}
-			catch (NumberFormatException e) {
+			catch (NumberFormatException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public int getInt(String columnLabel) throws SQLException {
+	public int getInt(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getInt(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public long getLong(int columnIndex) throws SQLException {
+	public long getLong(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return 0;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return Long.parseLong(Value);
 			}
-			catch (NumberFormatException e) {
+			catch (NumberFormatException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public long getLong(String columnLabel) throws SQLException {
+	public long getLong(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getLong(columnIndex);
 	}
@@ -779,10 +1060,10 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public ResultSetMetaData getMetaData() throws SQLException {
-		logger.debug("ResultSetMetaData getMetaData()" + "Not implemented");
-		throw new SQLException("Not implemented." + "getMetaData()");
-		// TODO Implement
+	public ResultSetMetaData getMetaData() throws SQLException
+	{
+		throwIfClosed();
+		return new MongoResultsetMetaData(this.mongoResult);
 	}
 
 	/**
@@ -794,7 +1075,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @see #getCharacterStream(int)
 	 */
 	@Override
-	public Reader getNCharacterStream(int columnIndex) throws SQLException {
+	public Reader getNCharacterStream(int columnIndex) throws SQLException
+	{
 		return this.getCharacterStream(columnIndex);
 	}
 
@@ -807,7 +1089,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @see #getCharacterStream(String)
 	 */
 	@Override
-	public Reader getNCharacterStream(String columnLabel) throws SQLException {
+	public Reader getNCharacterStream(String columnLabel) throws SQLException
+	{
 		return this.getCharacterStream(columnLabel);
 	}
 
@@ -820,7 +1103,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public NClob getNClob(int columnIndex) throws SQLException {
+	public NClob getNClob(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException("getNClob(int");
 	}
 
@@ -833,7 +1117,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public NClob getNClob(String columnLabel) throws SQLException {
+	public NClob getNClob(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException("getNClob(string)");
 	}
 
@@ -846,7 +1131,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @see #getString(int)
 	 */
 	@Override
-	public String getNString(int columnIndex) throws SQLException {
+	public String getNString(int columnIndex) throws SQLException
+	{
 		return this.getString(columnIndex);
 	}
 
@@ -859,7 +1145,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @see #getString(String)
 	 */
 	@Override
-	public String getNString(String columnLabel) throws SQLException {
+	public String getNString(String columnLabel) throws SQLException
+	{
 		return this.getString(columnLabel);
 	}
 
@@ -873,14 +1160,18 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public Object getObject(int columnIndex, Map<String, Class<?>> map)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException("getObject(int,Map)");
 		// TODO Implement TypeMaps
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Object getObject(String columnLabel) throws SQLException {
+	public Object getObject(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getObject(columnIndex);
 	}
@@ -895,7 +1186,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public Object getObject(String columnLabel, Map<String, Class<?>> map)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException("getObject(string,Map)");
 		// TODO Implement TypeMaps
 	}
@@ -909,7 +1201,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Ref getRef(int columnIndex) throws SQLException {
+	public Ref getRef(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException("getRef(int)");
 	}
 
@@ -922,26 +1215,19 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public Ref getRef(String columnLabel) throws SQLException {
+	public Ref getRef(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException("getref(String)");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public int getRow() throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null || this.RowsofResult.length == 0
-				  || this.Cursor == -1
-				  || this.Cursor > this.RowsofResult.length - 1) {
-			return 0;
-		}
-		else {
-			return this.Cursor + 1;
-		}
+	public int getRow() throws SQLException
+	{
+		throw new SQLException(
+				  "The Type of the Resultset is TYPE_FORWARD_ONLY");
 	}
 
 	/**
@@ -953,7 +1239,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public RowId getRowId(int columnIndex) throws SQLException {
+	public RowId getRowId(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException("getRowId(int)");
 	}
 
@@ -966,43 +1253,62 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public RowId getRowId(String columnLabel) throws SQLException {
+	public RowId getRowId(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException("getRowId(String)");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public short getShort(int columnIndex) throws SQLException {
+	public short getShort(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return 0;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return Short.parseShort(Value);
 			}
-			catch (NumberFormatException e) {
+			catch (NumberFormatException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public short getShort(String columnLabel) throws SQLException {
+	public short getShort(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getShort(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public SQLXML getSQLXML(int columnIndex) throws SQLException {
-		throw new UnsupportedOperationException("SQLXML not supported yet");
+	public SQLXML getSQLXML(int columnIndex) throws SQLException
+	{
+//		return new BQSQLXML(
+//				  this.getString(columnIndex));
+		throw new UnsupportedOperationException();
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public SQLXML getSQLXML(String columnLabel) throws SQLException {
+	public SQLXML getSQLXML(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getSQLXML(columnIndex);
 	}
@@ -1016,99 +1322,78 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @return null
 	 */
 	@Override
-	public Statement getStatement() throws SQLException {
-		return null;
+	public Statement getStatement() throws SQLException
+	{
+		return this.Statementreference;
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public String getString(String columnLabel) throws SQLException {
+	public String getString(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getString(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Time getTime(int columnIndex) throws SQLException {
+	public Time getTime(int columnIndex) throws SQLException
+	{
 		Long value = this.getLong(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return null;
 		}
-		else {
+		else
+		{
 			return new java.sql.Time(value);
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Time getTime(int columnIndex, Calendar cal) throws SQLException {
-        /*
-         * Select STRFTIME_UTC_USEC(NOW(),'%x-%X%Z') AS One,
-         * FORMAT_UTC_USEC(NOW()) as Two"; Result: One Two 08/21/12-15:40:45GMT
+	public Time getTime(int columnIndex, Calendar cal) throws SQLException
+	{
+		  /*
+			* Select STRFTIME_UTC_USEC(NOW(),'%x-%X%Z') AS One,
+         * FORMAT_UTC_USEC(NOW()) as Two"; mongoResult: One Two 08/21/12-15:40:45GMT
          * 2012-08-21 15:40:45.703908
          */
 		Long value = this.getLong(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return null;
 		}
-		else {
+		else
+		{
 			return new java.sql.Time(cal.getTimeZone().getRawOffset() + value);
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Time getTime(String columnLabel) throws SQLException {
+	public Time getTime(String columnLabel) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getTime(columnIndex);
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public Time getTime(String columnLabel, Calendar cal) throws SQLException {
+	public Time getTime(String columnLabel, Calendar cal) throws SQLException
+	{
 		int columnIndex = this.findColumn(columnLabel);
 		return this.getTime(columnIndex, cal);
-	}
-
-	/** {@inheritDoc} */
-	@Override
-	public Timestamp getTimestamp(int columnIndex) throws SQLException {
-		Long value = this.getLong(columnIndex);
-		if (this.wasNull()) {
-			return null;
-		}
-		else {
-			return new java.sql.Timestamp(value);
-		}
-	}
-
-	/** {@inheritDoc} */
-	@Override
-	public Timestamp getTimestamp(int columnIndex, Calendar cal)
-			  throws SQLException {
-		Long value = this.getLong(columnIndex);
-		if (this.wasNull()) {
-			return null;
-		}
-		else {
-			return new java.sql.Timestamp(cal.getTimeZone().getRawOffset()
-					  + value);
-		}
-	}
-
-	/** {@inheritDoc} */
-	@Override
-	public Timestamp getTimestamp(String columnLabel) throws SQLException {
-		int columnIndex = this.findColumn(columnLabel);
-		return this.getTimestamp(columnIndex);
-	}
-
-	/** {@inheritDoc} */
-	@Override
-	public Timestamp getTimestamp(String columnLabel, Calendar cal)
-			  throws SQLException {
-		int columnIndex = this.findColumn(columnLabel);
-		return this.getTimestamp(columnIndex, cal);
 	}
 
 	/**
@@ -1120,9 +1405,10 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @return ResultSet.TYPE_SCROLL_INSENSITIVE
 	 */
 	@Override
-	public int getType() throws SQLException {
+	public int getType() throws SQLException
+	{
 		throwIfClosed();
-		return ResultSet.TYPE_SCROLL_INSENSITIVE;
+		return ResultSet.TYPE_FORWARD_ONLY;
 	}
 
 	/**
@@ -1134,7 +1420,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public InputStream getUnicodeStream(int columnIndex) throws SQLException {
+	public InputStream getUnicodeStream(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException(
 				  "Deprecated. use getCharacterStream in place of getUnicodeStream");
 	}
@@ -1148,40 +1435,55 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public InputStream getUnicodeStream(String columnLabel) throws SQLException {
+	public InputStream getUnicodeStream(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException(
 				  "Deprecated. use getCharacterStream in place of getUnicodeStream");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public URL getURL(int columnIndex) throws SQLException {
+	public URL getURL(int columnIndex) throws SQLException
+	{
 		String Value = this.getString(columnIndex);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return null;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return new URL(Value);
 			}
-			catch (MalformedURLException e) {
+			catch (MalformedURLException e)
+			{
 				throw new SQLException(e);
 			}
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public URL getURL(String columnLabel) throws SQLException {
+	public URL getURL(String columnLabel) throws SQLException
+	{
 		String Value = this.getString(columnLabel);
-		if (this.wasNull()) {
+		if (this.wasNull())
+		{
 			return null;
 		}
-		else {
-			try {
+		else
+		{
+			try
+			{
 				return new URL(Value);
 			}
-			catch (MalformedURLException e) {
+			catch (MalformedURLException e)
+			{
 				throw new SQLException(e);
 			}
 		}
@@ -1196,7 +1498,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @return null
 	 */
 	@Override
-	public SQLWarning getWarnings() throws SQLException {
+	public SQLWarning getWarnings() throws SQLException
+	{
 		// TODO implement error handling
 		return null;
 	}
@@ -1210,68 +1513,52 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void insertRow() throws SQLException {
+	public void insertRow() throws SQLException
+	{
 		throw new UnsupportedOperationException("insertRow()");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean isAfterLast() throws SQLException {
+	public boolean isAfterLast() throws SQLException
+	{
 		throwIfClosed();
-		if (this.RowsofResult != null
-				  && this.Cursor == this.RowsofResult.length
-				  && this.RowsofResult.length != 0) {
-			return true;
-		}
-		else {
-			return false;
-		}
+		throw new SQLException("Forward_only resultset doesn't support isAfterLast() ");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean isBeforeFirst() throws SQLException {
+	public boolean isBeforeFirst() throws SQLException
+	{
 		throwIfClosed();
-		if (this.RowsofResult != null && this.Cursor == -1
-				  && this.RowsofResult.length != 0) {
-			return true;
-		}
-		else {
-			return false;
-		}
+		if (Cursor == -1) return true;
+		throw new SQLException("Forward_only resultset doesn't support isBeforeFirst() ");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean isClosed() throws SQLException {
-		return this.Closed;
+	public boolean isFirst() throws SQLException
+	{
+		if (this.isClosed())
+		{
+			throw new SQLException("This Resultset is Closed");
+		}
+		return AT_FIRST;
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean isFirst() throws SQLException {
-		throwIfClosed();
-		if (this.Cursor == 0 && this.RowsofResult != null
-				  && this.RowsofResult.length != 0) {
-			return true;
-		}
-		else {
-			return false;
-		}
-	}
-
-	/** {@inheritDoc} */
-	@Override
-	public boolean isLast() throws SQLException {
-		throwIfClosed();
-		if (this.RowsofResult != null
-				  && this.Cursor == this.RowsofResult.length - 1
-				  && this.RowsofResult.length - 1 >= 0) {
-			return true;
-		}
-		else {
-			return false;
-		}
+	public boolean isLast() throws SQLException
+	{
+		throw new UnsupportedOperationException("isLast()");
 	}
 
 	/**
@@ -1283,25 +1570,19 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @return false
 	 */
 	@Override
-	public boolean isWrapperFor(Class<?> iface) throws SQLException {
+	public boolean isWrapperFor(Class<?> iface) throws SQLException
+	{
 		return false;
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean last() throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null || this.RowsofResult.length == 0) {
-			return false;
-		}
-		else {
-			this.Cursor = this.RowsofResult.length - 1;
-			return true;
-		}
+	public boolean last() throws SQLException
+	{
+		throw new SQLException(
+				  "The Type of the Resultset is TYPE_FORWARD_ONLY");
 	}
 
 	/**
@@ -1313,7 +1594,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void moveToCurrentRow() throws SQLException {
+	public void moveToCurrentRow() throws SQLException
+	{
 		throw new UnsupportedOperationException("moveToCurrentRow()");
 	}
 
@@ -1326,50 +1608,49 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void moveToInsertRow() throws SQLException {
+	public void moveToInsertRow() throws SQLException
+	{
 		throw new UnsupportedOperationException("moveToInsertRow()");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean next() throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
+	public boolean next() throws SQLException
+	{
 		throwIfClosed();
-		if (this.RowsofResult == null) {
+
+		if (this.RowsofResult == null)
+		{
 			return false;
 		}
-		if (this.RowsofResult.length > this.Cursor + 1) {
-			this.Cursor++;
+		if (Cursor < RowsofResult.length - 1)
+		{
+			AT_FIRST = (Cursor == -1);
+			Cursor++;
 			return true;
 		}
-		else {
-			this.Cursor = this.RowsofResult.length;
-			return false;
+		else
+		{
+			if (this.mongoResult.fetchData(FETCH_SIZE))
+			{
+				Cursor = 0;
+				this.RowsofResult = this.mongoResult.asArray();
+				return true;
+			}
+			else return false;
 		}
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean previous() throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null) {
-			return false;
-		}
-		if (this.Cursor > 0) {
-			this.Cursor--;
-			return true;
-		}
-		else {
-			this.Cursor = -1;
-			return false;
-		}
+	public boolean previous() throws SQLException
+	{
+		throw new SQLException(
+				  "The Type of the Resultset is TYPE_FORWARD_ONLY");
 	}
 
 	/**
@@ -1381,51 +1662,19 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void refreshRow() throws SQLException {
+	public void refreshRow() throws SQLException
+	{
 		throw new UnsupportedOperationException("refreshRow()");
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean relative(int rows) throws SQLException {
-		if (this.getType() == ResultSet.TYPE_FORWARD_ONLY) {
-			throw new SQLException(
-					  "The Type of the Resultset is TYPE_FORWARD_ONLY");
-		}
-		throwIfClosed();
-		if (this.RowsofResult == null) {
-			return false;
-		}
-		if (rows == 0) {
-			if (this.RowsofResult.length != 0
-					  && this.Cursor < this.RowsofResult.length
-					  && this.Cursor > -1) {
-				return true;
-			}
-			else {
-				return false;
-			}
-		}
-		else
-		if (rows < 0) {
-			if (this.Cursor + rows < 0) {
-				this.Cursor = -1;
-				return false;
-			}
-			else {
-				this.Cursor = this.Cursor + rows;
-				return true;
-			}
-		}
-		else
-		if (rows + this.Cursor > (this.RowsofResult.length - 1)) {
-			this.Cursor = this.RowsofResult.length;
-			return false;
-		}
-		else {
-			this.Cursor += rows;
-			return true;
-		}
+	public boolean relative(int rows) throws SQLException
+	{
+		throw new SQLException(
+				  "The Type of the Resultset is TYPE_FORWARD_ONLY");
 	}
 
 	/**
@@ -1437,7 +1686,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public boolean rowDeleted() throws SQLException {
+	public boolean rowDeleted() throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1450,7 +1700,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public boolean rowInserted() throws SQLException {
+	public boolean rowInserted() throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1463,7 +1714,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public boolean rowUpdated() throws SQLException {
+	public boolean rowUpdated() throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1476,7 +1728,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public void setFetchDirection(int direction) throws SQLException {
+	public void setFetchDirection(int direction) throws SQLException
+	{
 		throw new SQLException("Not implemented." + "setFetchDirection(int)");
 	}
 
@@ -1489,28 +1742,9 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	public void setFetchSize(int rows) throws SQLException {
-		throw new SQLException("Not implemented." + "setFetchSize(int)");
-	}
-
-	/**
-	 * @throws SQLException
-	 *             if Cursor is not in a valid Position
-	 */
-	public void ThrowIfCursorNotValidException() throws SQLException {
-		if (this.RowsofResult == null || this.RowsofResult.length == 0) {
-			throw new SQLException("There are no rows in this Resultset"
-					  + String.valueOf(this.Cursor) + "RowsofResult.length"
-					  + String.valueOf(this.RowsofResult.length));
-		}
-		else
-		if (this.Cursor >= this.RowsofResult.length || this.Cursor <= -1) {
-			throw new SQLException(
-					  "Cursor is not in a valid Position. Cursor Position is:"
-								 + String.valueOf(this.Cursor)
-								 + "RowsofResult.length"
-								 + String.valueOf(this.RowsofResult.length));
-		}
+	public void setFetchSize(int rows) throws SQLException
+	{
+		FETCH_SIZE = rows;
 	}
 
 	/**
@@ -1522,8 +1756,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws SQLException
 	 */
 	@Override
-	@SuppressWarnings("hiding")
-	public <T> T unwrap(Class<T> iface) throws SQLException {
+	public <T> T unwrap(Class<T> iface) throws SQLException
+	{
 		throw new SQLException("Not implemented." + "unwrap(Class<T>)");
 	}
 
@@ -1536,7 +1770,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateArray(int columnIndex, Array x) throws SQLException {
+	public void updateArray(int columnIndex, Array x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1549,7 +1784,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateArray(String columnLabel, Array x) throws SQLException {
+	public void updateArray(String columnLabel, Array x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1563,7 +1799,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateAsciiStream(int columnIndex, InputStream x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1577,7 +1814,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateAsciiStream(int columnIndex, InputStream x, int length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1591,7 +1829,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateAsciiStream(int columnIndex, InputStream x, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1605,7 +1844,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateAsciiStream(String columnLabel, InputStream x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1619,7 +1859,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateAsciiStream(String columnLabel, InputStream x, int length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1633,7 +1874,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateAsciiStream(String columnLabel, InputStream x, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1647,7 +1889,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBigDecimal(int columnIndex, BigDecimal x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1661,7 +1904,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBigDecimal(String columnLabel, BigDecimal x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1675,7 +1919,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBinaryStream(int columnIndex, InputStream x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1689,7 +1934,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBinaryStream(int columnIndex, InputStream x, int length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1703,7 +1949,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBinaryStream(int columnIndex, InputStream x, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1717,7 +1964,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBinaryStream(String columnLabel, InputStream x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1731,7 +1979,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBinaryStream(String columnLabel, InputStream x, int length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1745,7 +1994,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBinaryStream(String columnLabel, InputStream x,
-											 long length) throws SQLException {
+											 long length) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1758,7 +2008,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateBlob(int columnIndex, Blob x) throws SQLException {
+	public void updateBlob(int columnIndex, Blob x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1772,7 +2023,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBlob(int columnIndex, InputStream inputStream)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1786,7 +2038,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBlob(int columnIndex, InputStream inputStream, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1799,7 +2052,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateBlob(String columnLabel, Blob x) throws SQLException {
+	public void updateBlob(String columnLabel, Blob x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1813,7 +2067,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBlob(String columnLabel, InputStream inputStream)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1827,7 +2082,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBlob(String columnLabel, InputStream inputStream,
-								  long length) throws SQLException {
+								  long length) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1840,7 +2096,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateBoolean(int columnIndex, boolean x) throws SQLException {
+	public void updateBoolean(int columnIndex, boolean x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1854,7 +2111,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateBoolean(String columnLabel, boolean x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1867,7 +2125,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateByte(int columnIndex, byte x) throws SQLException {
+	public void updateByte(int columnIndex, byte x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1880,7 +2139,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateByte(String columnLabel, byte x) throws SQLException {
+	public void updateByte(String columnLabel, byte x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1893,7 +2153,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateBytes(int columnIndex, byte[] x) throws SQLException {
+	public void updateBytes(int columnIndex, byte[] x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1906,7 +2167,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateBytes(String columnLabel, byte[] x) throws SQLException {
+	public void updateBytes(String columnLabel, byte[] x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1920,7 +2182,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateCharacterStream(int columnIndex, Reader x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1934,7 +2197,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateCharacterStream(int columnIndex, Reader x, int length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1948,7 +2212,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateCharacterStream(int columnIndex, Reader x, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1962,7 +2227,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateCharacterStream(String columnLabel, Reader reader)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1976,7 +2242,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateCharacterStream(String columnLabel, Reader reader,
-												 int length) throws SQLException {
+												 int length) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -1990,7 +2257,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateCharacterStream(String columnLabel, Reader reader,
-												 long length) throws SQLException {
+												 long length) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2003,7 +2271,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateClob(int columnIndex, Clob x) throws SQLException {
+	public void updateClob(int columnIndex, Clob x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2016,7 +2285,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateClob(int columnIndex, Reader reader) throws SQLException {
+	public void updateClob(int columnIndex, Reader reader) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2030,7 +2300,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateClob(int columnIndex, Reader reader, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2043,7 +2314,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateClob(String columnLabel, Clob x) throws SQLException {
+	public void updateClob(String columnLabel, Clob x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2057,7 +2329,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateClob(String columnLabel, Reader reader)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2071,7 +2344,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateClob(String columnLabel, Reader reader, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2084,7 +2358,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateDate(int columnIndex, Date x) throws SQLException {
+	public void updateDate(int columnIndex, Date x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2097,7 +2372,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateDate(String columnLabel, Date x) throws SQLException {
+	public void updateDate(String columnLabel, Date x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2110,7 +2386,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateDouble(int columnIndex, double x) throws SQLException {
+	public void updateDouble(int columnIndex, double x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2123,7 +2400,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateDouble(String columnLabel, double x) throws SQLException {
+	public void updateDouble(String columnLabel, double x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2136,7 +2414,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateFloat(int columnIndex, float x) throws SQLException {
+	public void updateFloat(int columnIndex, float x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2149,7 +2428,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateFloat(String columnLabel, float x) throws SQLException {
+	public void updateFloat(String columnLabel, float x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2162,7 +2442,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateInt(int columnIndex, int x) throws SQLException {
+	public void updateInt(int columnIndex, int x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2175,7 +2456,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateInt(String columnLabel, int x) throws SQLException {
+	public void updateInt(String columnLabel, int x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2188,7 +2470,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateLong(int columnIndex, long x) throws SQLException {
+	public void updateLong(int columnIndex, long x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2201,7 +2484,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateLong(String columnLabel, long x) throws SQLException {
+	public void updateLong(String columnLabel, long x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2215,7 +2499,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNCharacterStream(int columnIndex, Reader x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2229,7 +2514,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNCharacterStream(int columnIndex, Reader x, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2243,7 +2529,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNCharacterStream(String columnLabel, Reader reader)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2257,7 +2544,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNCharacterStream(String columnLabel, Reader reader,
-												  long length) throws SQLException {
+												  long length) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2270,7 +2558,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateNClob(int columnIndex, NClob nClob) throws SQLException {
+	public void updateNClob(int columnIndex, NClob nClob) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2283,7 +2572,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateNClob(int columnIndex, Reader reader) throws SQLException {
+	public void updateNClob(int columnIndex, Reader reader) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2297,7 +2587,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNClob(int columnIndex, Reader reader, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2311,7 +2602,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNClob(String columnLabel, NClob nClob)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2325,7 +2617,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNClob(String columnLabel, Reader reader)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2339,7 +2632,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNClob(String columnLabel, Reader reader, long length)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2353,7 +2647,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNString(int columnIndex, String nString)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2367,7 +2662,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateNString(String columnLabel, String nString)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2380,7 +2676,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateNull(int columnIndex) throws SQLException {
+	public void updateNull(int columnIndex) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2393,7 +2690,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateNull(String columnLabel) throws SQLException {
+	public void updateNull(String columnLabel) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2406,7 +2704,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateObject(int columnIndex, Object x) throws SQLException {
+	public void updateObject(int columnIndex, Object x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2420,7 +2719,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateObject(int columnIndex, Object x, int scaleOrLength)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2433,7 +2733,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateObject(String columnLabel, Object x) throws SQLException {
+	public void updateObject(String columnLabel, Object x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2447,7 +2748,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateObject(String columnLabel, Object x, int scaleOrLength)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2460,7 +2762,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateRef(int columnIndex, Ref x) throws SQLException {
+	public void updateRef(int columnIndex, Ref x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2473,7 +2776,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateRef(String columnLabel, Ref x) throws SQLException {
+	public void updateRef(String columnLabel, Ref x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2486,7 +2790,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateRow() throws SQLException {
+	public void updateRow() throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2499,7 +2804,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateRowId(int columnIndex, RowId x) throws SQLException {
+	public void updateRowId(int columnIndex, RowId x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2512,7 +2818,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateRowId(String columnLabel, RowId x) throws SQLException {
+	public void updateRowId(String columnLabel, RowId x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2525,7 +2832,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateShort(int columnIndex, short x) throws SQLException {
+	public void updateShort(int columnIndex, short x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2538,7 +2846,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateShort(String columnLabel, short x) throws SQLException {
+	public void updateShort(String columnLabel, short x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2552,7 +2861,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateSQLXML(int columnIndex, SQLXML xmlObject)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2566,7 +2876,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateSQLXML(String columnLabel, SQLXML xmlObject)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2579,7 +2890,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateString(int columnIndex, String x) throws SQLException {
+	public void updateString(int columnIndex, String x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2592,7 +2904,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateString(String columnLabel, String x) throws SQLException {
+	public void updateString(String columnLabel, String x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2605,7 +2918,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateTime(int columnIndex, Time x) throws SQLException {
+	public void updateTime(int columnIndex, Time x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2618,7 +2932,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 * @throws UnsupportedOperationException
 	 */
 	@Override
-	public void updateTime(String columnLabel, Time x) throws SQLException {
+	public void updateTime(String columnLabel, Time x) throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2632,7 +2947,8 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateTimestamp(int columnIndex, Timestamp x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
@@ -2646,13 +2962,37 @@ abstract class ScrollableResultset<T> implements java.sql.ResultSet {
 	 */
 	@Override
 	public void updateTimestamp(String columnLabel, Timestamp x)
-			  throws SQLException {
+			  throws SQLException
+	{
 		throw new UnsupportedOperationException();
 	}
 
-	/** {@inheritDoc} */
+	/**
+	 * {@inheritDoc}
+	 */
 	@Override
-	public boolean wasNull() throws SQLException {
+	public boolean wasNull() throws SQLException
+	{
 		return this.wasnull;
+	}
+
+	//------------------------- for Jdk1.7 -----------------------------------
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public <T> T getObject(int columnIndex, Class<T> type) throws SQLException
+	{
+		return null;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public <T> T getObject(String columnLabel, Class<T> type) throws SQLException
+	{
+		return null;
 	}
 }

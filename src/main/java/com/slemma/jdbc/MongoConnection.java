@@ -6,10 +6,7 @@ import org.bson.Document;
 import org.slf4j.LoggerFactory;
 
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.Executor;
 
 /**
@@ -34,6 +31,7 @@ public class MongoConnection implements Connection
 	private String url = null;
 
 	private final String database;
+	private String timeZone;
 
 	private Properties properties;
 
@@ -68,6 +66,12 @@ public class MongoConnection implements Connection
 			this.database = mongoURI.getDatabase();
 		else
 			this.database = info.getProperty("database");
+
+		String timeZoneProp = info.getProperty("timeZone");
+		if (timeZoneProp != null)
+			this.timeZone = timeZoneProp;
+		else
+			this.timeZone = "UTC";
 
 		//check connection
 		Document pingCommand = new Document("ping", "1");
@@ -883,6 +887,16 @@ public class MongoConnection implements Connection
 	public Properties getProperties()
 	{
 		return properties;
+	}
+
+	public String getTimeZone()
+	{
+		return timeZone;
+	}
+
+	public void setTimeZone(String value)
+	{
+		this.timeZone = value;
 	}
 
 	public class AbortCommand implements Runnable
