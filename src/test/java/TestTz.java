@@ -53,7 +53,7 @@ public class TestTz
 	}
 
 	@Test
-	public void findWithDateTest()
+	public void testTimestampAsString()
 	{
 
 		ResultSet rs;
@@ -88,4 +88,76 @@ public class TestTz
 		}
 		Assert.assertTrue(true);
 	}
+
+	@Test
+	public void testTimestampTz()
+	{
+
+		ResultSet rs;
+		String query = "{ \"find\" : \"bios\"}";
+		try
+		{
+			Statement stmt = this.con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+			rs = stmt.executeQuery(query);
+			Assert.assertNotNull(rs);
+
+			ResultSetMetaData rsMetadata = rs.getMetaData();
+			Assert.assertEquals(rsMetadata.getColumnTypeName(6).toUpperCase(), "TIMESTAMP");
+			Assert.assertEquals(rsMetadata.getColumnTypeName(7).toUpperCase(), "TIMESTAMP");
+
+			Assert.assertTrue(rs.next());
+			Assert.assertEquals(-1422558000000L, rs.getTimestamp(6).getTime());
+			Assert.assertEquals(1174104000000L, rs.getTimestamp(7).getTime());
+
+			this.con.setTimeZone("CET");
+			stmt = this.con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+			rs = stmt.executeQuery(query);
+			Assert.assertTrue(rs.next());
+			Assert.assertEquals(-1422558000000L, rs.getTimestamp(6).getTime());
+			Assert.assertEquals(1174104000000L, rs.getTimestamp(7).getTime());
+
+			this.con.setTimeZone("UTC");
+			stmt = this.con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+			rs = stmt.executeQuery(query);
+			Assert.assertTrue(rs.next());
+			Assert.assertEquals(-1422558000000L, rs.getTimestamp(6).getTime());
+			Assert.assertEquals(1174104000000L, rs.getTimestamp(7).getTime());
+		}
+		catch (SQLException e)
+		{
+			this.logger.error("Exception: " + e.toString());
+			Assert.fail("Exception: " + e.toString());
+		}
+		Assert.assertTrue(true);
+	}
+
+
+	@Test
+	public void testGetObjectForTimestamp()
+	{
+
+		ResultSet rs;
+		String query = "{ \"find\" : \"bios\"}";
+		try
+		{
+			Statement stmt = this.con.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+			rs = stmt.executeQuery(query);
+			Assert.assertNotNull(rs);
+
+			ResultSetMetaData rsMetadata = rs.getMetaData();
+			Assert.assertEquals(rsMetadata.getColumnTypeName(6).toUpperCase(), "TIMESTAMP");
+			Assert.assertEquals(rsMetadata.getColumnTypeName(7).toUpperCase(), "TIMESTAMP");
+
+			Assert.assertTrue(rs.next());
+			Assert.assertEquals(rs.getObject(6).getClass().getName(), "java.sql.Timestamp");
+			Assert.assertEquals(rs.getObject(7).getClass().getName(), "java.sql.Timestamp");
+		}
+		catch (SQLException e)
+		{
+			this.logger.error("Exception: " + e.toString());
+			Assert.fail("Exception: " + e.toString());
+		}
+		Assert.assertTrue(true);
+	}
+
 }

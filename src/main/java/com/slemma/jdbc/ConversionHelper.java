@@ -156,18 +156,6 @@ public class ConversionHelper
 	}
 
 
-	public static Object getValueAsObject(int type, Object value) {
-		if(value == null) {
-			return null;
-		} else if (value.getClass() == org.bson.types.ObjectId.class)
-			return value.toString();
-		else if (value.getClass() == java.util.Date.class) {
-			java.util.Date utilDate = (java.util.Date) value;
-			return new java.sql.Timestamp(utilDate.getTime());
-		} else
-			return value;
-	}
-
 	/**
 	 * Retrieves the value  as a <code>java.sql.Date</code> object
 	 * in the Java programming language.
@@ -192,17 +180,22 @@ public class ConversionHelper
 		return getValueAsDate(value, null);
 	}
 
-
 	public static java.sql.Timestamp getValueAsTimestamp(Object value, Calendar cal) {
 		if (value == null)
 			return null;
-
-		cal.setTimeInMillis(((java.util.Date) value).getTime());
-		return new Timestamp(cal.getTimeInMillis());
+		if (value.getClass() == java.util.Date.class)
+			return new Timestamp(((java.util.Date) value).getTime());
+		else
+			throw new IllegalArgumentException("Unsupported value type");
 	}
 
 	public static java.sql.Timestamp getValueAsTimestamp(Object value) {
 		return getValueAsTimestamp(value, getCalendar("UTC"));
+	}
+
+	public static java.sql.Timestamp getValueAsTimestamp(Object value, String timeZone) {
+		Calendar cal = ConversionHelper.getCalendar(timeZone);
+		return getValueAsTimestamp(value, cal);
 	}
 
 	public static Calendar getCalendar(String timeZone)

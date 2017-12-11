@@ -90,6 +90,24 @@ public class BaseResultSet implements java.sql.ResultSet
 		return (MongoConnection)this.Statementreference.getConnection();
 	}
 
+	private Object getFieldValue(int columnIndex) throws SQLException
+	{
+		this.closestrm();
+
+		throwIfClosedOrInvalid();
+		throwIfInvalidIndex(columnIndex);
+
+		Document doc = (Document) this.RowsofResult[this.Cursor];
+		MongoField field = ((MongoResultsetMetaData) this.getMetaData()).mongoResult.getFields().get(columnIndex - 1);
+		ArrayList<String> path = field.getPath();
+		for (int i = 0; i < path.size() - 1; i++)
+		{
+			doc = (Document) doc.get(path.get(i));
+		}
+
+		return  doc.get(path.get(path.size() - 1));
+	}
+
 	/**
 	 * {@inheritDoc}
 	 */
@@ -131,20 +149,15 @@ public class BaseResultSet implements java.sql.ResultSet
 	 */
 	public Object getObject(int columnIndex) throws SQLException
 	{
-		this.closestrm();
-
-		throwIfClosedOrInvalid();
-		throwIfInvalidIndex(columnIndex);
-
-		Document doc = (Document) this.RowsofResult[this.Cursor];
-		MongoField field = ((MongoResultsetMetaData) this.getMetaData()).mongoResult.getFields().get(columnIndex - 1);
-		ArrayList<String> path = field.getPath();
-		for (int i = 0; i < path.size() - 1; i++)
-		{
-			doc = (Document) doc.get(path.get(i));
-		}
-
-		return ConversionHelper.getValueAsObject(field.getType(), doc.get(path.get(path.size() - 1)));
+		Object value = getFieldValue(columnIndex);
+		if(value == null) {
+			return null;
+		} else if (value.getClass() == org.bson.types.ObjectId.class)
+			return value.toString();
+		else if (value.getClass() == java.util.Date.class) {
+			return ConversionHelper.getValueAsTimestamp(value, this.getConnection().getTimeZone());
+		} else
+			return value;
 	}
 
 	@Override
@@ -156,20 +169,7 @@ public class BaseResultSet implements java.sql.ResultSet
 	 */
 	public String getString(int columnIndex) throws SQLException
 	{
-		this.closestrm();
-
-		throwIfClosedOrInvalid();
-		throwIfInvalidIndex(columnIndex);
-
-		Document doc = (Document) this.RowsofResult[this.Cursor];
-		MongoField field = ((MongoResultsetMetaData) this.getMetaData()).mongoResult.getFields().get(columnIndex - 1);
-		ArrayList<String> path = field.getPath();
-		for (int i = 0; i < path.size() - 1; i++)
-		{
-			doc = (Document) doc.get(path.get(i));
-		}
-
-		Object data = doc.get(path.get(path.size() - 1));
+		Object data = getFieldValue(columnIndex);
 
 		if (data == null)
 		{
@@ -179,7 +179,7 @@ public class BaseResultSet implements java.sql.ResultSet
 		else
 		{
 			this.wasnull = false;
-			if (data.getClass().getName().equals("java.util.Date"))
+			if (data.getClass() == java.util.Date.class)
 			{
 				String timeZone = this.getConnection().getTimeZone();
 				ConversionHelper.TIMESTAMP_TZ_FORMAT.setTimeZone(TimeZone.getTimeZone(timeZone));
@@ -799,7 +799,7 @@ public class BaseResultSet implements java.sql.ResultSet
 	@Override
 	public Date getDate(int columnIndex) throws SQLException
 	{
-		return ConversionHelper.getValueAsDate(this.getObject(columnIndex));
+		return ConversionHelper.getValueAsDate(this.getFieldValue(columnIndex));
 	}
 
 	/**
@@ -808,7 +808,7 @@ public class BaseResultSet implements java.sql.ResultSet
 	@Override
 	public Date getDate(int columnIndex, Calendar cal) throws SQLException
 	{
-		return ConversionHelper.getValueAsDate(this.getObject(columnIndex), cal);
+		return ConversionHelper.getValueAsDate(this.getFieldValue(columnIndex), cal);
 	}
 
 	/**
@@ -838,7 +838,8 @@ public class BaseResultSet implements java.sql.ResultSet
 	@Override
 	public Timestamp getTimestamp(int columnIndex) throws SQLException
 	{
-		return ConversionHelper.getValueAsTimestamp(this.getObject(columnIndex));
+		String timeZone = this.getConnection().getTimeZone();
+		return ConversionHelper.getValueAsTimestamp(getFieldValue(columnIndex), timeZone);
 	}
 
 	/**
@@ -848,7 +849,7 @@ public class BaseResultSet implements java.sql.ResultSet
 	public Timestamp getTimestamp(int columnIndex, Calendar cal)
 			  throws SQLException
 	{
-		return ConversionHelper.getValueAsTimestamp(this.getObject(columnIndex), cal);
+		return ConversionHelper.getValueAsTimestamp(getFieldValue(columnIndex), cal);
 	}
 
 	/**
