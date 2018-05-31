@@ -53,6 +53,7 @@ public class MongoDriver implements java.sql.Driver
 	 * Url prefix for using this driver
 	 */
 	private static final String PREFIX = "jdbc:mongodb:mql:";
+	private static final String PREFIX_SRV = "jdbc:mongodb+srv:mql:";
 	private static final String PROTOCOL = "mongodb";
 	private static final String SUB_PROTOCOL = "mql";
 	/**
@@ -141,7 +142,7 @@ public class MongoDriver implements java.sql.Driver
 	@Override
 	public boolean acceptsURL(String url) throws SQLException
 	{
-		return url != null && url.toLowerCase().startsWith(PREFIX);
+		return url != null && (url.toLowerCase().startsWith(PREFIX) || url.toLowerCase().startsWith(PREFIX_SRV));
 	}
 
 	/**
@@ -162,13 +163,14 @@ public class MongoDriver implements java.sql.Driver
 		for (DriverPropertyInfo driverProp : driverProps)
 		{
 
-			if (!info.containsKey(driverProp.name))
+			if (!info.containsKey(driverProp.name) && driverProp.value!=null)
 			{
 				info.setProperty(driverProp.name, driverProp.value);
 			}
 		}
 
 		url = url.replace(this.PREFIX, "mongodb:");
+		url = url.replace(this.PREFIX_SRV, "mongodb+srv:");
 		return new MongoConnection(url, info);
 	}
 
@@ -258,6 +260,7 @@ public class MongoDriver implements java.sql.Driver
 		Properties urlProps = new Properties(defaults);
 
 		url = url.replace(PREFIX, "mongodb:");
+		url = url.replace(PREFIX_SRV, "mongodb+srv:");
 		MongoClientURI mongoURI = new MongoClientURI(url, MongoClientOptions.builder());
 
 		if (mongoURI.getHosts().size()>0)

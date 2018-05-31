@@ -6,7 +6,7 @@
 
     <groupId>com.slemma</groupId>
     <artifactId>mongo-jdbc</artifactId>
-    <version>1.0.20</version>
+    <version>1.0.21</version>
     <name>Mongodb over JDBC</name>
     <description>A simple JDBC driver, to reach MongoDb</description>
 
@@ -21,7 +21,7 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongo-java-driver</artifactId>
-            <version>3.2.2</version>
+            <version>3.6.3</version>
         </dependency>
 
         <dependency>

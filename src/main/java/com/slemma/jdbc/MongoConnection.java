@@ -59,6 +59,14 @@ public class MongoConnection implements Connection
 				optionsBuilder = optionsBuilder.serverSelectionTimeout(connectTimeout);
 				optionsBuilder = optionsBuilder.connectTimeout(connectTimeout);
 			}
+			if (info.containsKey("ssl") && info.get("ssl") != null )
+			{
+				optionsBuilder.sslEnabled(Boolean.valueOf((String)info.get("ssl")));
+			}
+			if (info.containsKey("sslInvalidHostNameAllowed") && info.get("sslInvalidHostNameAllowed") != null )
+			{
+				optionsBuilder.sslInvalidHostNameAllowed(Boolean.valueOf((String)info.get("sslInvalidHostNameAllowed")));
+			}
 		}
 		MongoClientURI mongoURI = new MongoClientURI(url, optionsBuilder);
 		this.mongoClient = new MongoClient(mongoURI);

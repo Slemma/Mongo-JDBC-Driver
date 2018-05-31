@@ -49,7 +49,14 @@ public enum MongoDriverProperty
 	DATABASE("database", null, "Database name", true, null),
 	USER("user", null, "Username to authenticate as", false, null),
 	PASSWORD("password", null, "Password to use for authentication", false, null),
-	BATCH_SIZE("batch_size", "1000", "Batch size", false, null);
+	BATCH_SIZE("batch_size", "1000", "Batch size", false, null),
+	SERVER_SELECTION_TIMEOUT_MS("serverSelectionTimeoutMS", null, "serverSelectionTimeoutMS=ms: How long the driver will wait for server selection to succeed before throwing an exception", false, null),
+	LOCAL_THRESHOLD_MS("localThresholdMS", null, "localThresholdMS=ms: When choosing among multiple MongoDB servers to send a request, the driver will only send that request to a server whose ping time is less than or equal to the server with the fastest ping time plus the local threshold", false, null),
+	HEARTBEAT_FREQUENCY_MS("heartbeatFrequencyMS", null, "heartbeatFrequencyMS=ms: The frequency that the driver will attempt to determine the current state of each server in the cluster", false, null),
+	REPLICA_SET("replicaSet", null, "replicaSet=name: Implies that the hosts given are a seed list, and the driver will attempt to find all members of the set", false, null),
+	INVALID_HOSTNAME_ALLOWED("sslInvalidHostNameAllowed", null, "sslInvalidHostNameAllowed=true|false: Whether to allow invalid host names for SSL connections", false, new String[]{"true","false"}),
+	CONNECT_TIMEOUT_MS("connectTimeoutMS", null, "connectTimeoutMS=ms: How long a connection can take to be opened before timing out", false, null),
+	SOCKET_TIMEOUT_MS("socketTimeoutMS", null, "socketTimeoutMS=ms: How long a send or receive on a socket can take before timing out", false, null);
 
 	public final String name;
 	public final String defaultValue;
