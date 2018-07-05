@@ -31,7 +31,7 @@ public class MongoConnection implements Connection
 	private String url = null;
 
 	private final String database;
-	private String timeZone;
+	private String timeZone = "UTC";
 
 	private Properties properties;
 
@@ -53,33 +53,69 @@ public class MongoConnection implements Connection
 		this.properties = info;
 
 		MongoClientOptions.Builder optionsBuilder = MongoClientOptions.builder();
-		if (info != null) {
-			if (info.containsKey("connectTimeout") && info.get("connectTimeout") != null ) {
-				int connectTimeout = (Integer.valueOf((String)info.get("connectTimeout"))).intValue() * 1000;
-				optionsBuilder = optionsBuilder.serverSelectionTimeout(connectTimeout);
-				optionsBuilder = optionsBuilder.connectTimeout(connectTimeout);
-			}
-			if (info.containsKey("ssl") && info.get("ssl") != null )
+		Set<String> propNames = info.stringPropertyNames();
+		String optionsString = "";
+		for (String propName : propNames)
+		{
+			if (info.get(propName) != null && !info.get(propName).equals(""))
 			{
-				optionsBuilder.sslEnabled(Boolean.valueOf((String)info.get("ssl")));
-			}
-			if (info.containsKey("sslInvalidHostNameAllowed") && info.get("sslInvalidHostNameAllowed") != null )
-			{
-				optionsBuilder.sslInvalidHostNameAllowed(Boolean.valueOf((String)info.get("sslInvalidHostNameAllowed")));
+				if (propName.equals("connectTimeout")
+				// если явно опеределены serverSelectionTimeoutMS или connectTimeoutMS, то connectTimeout не используем
+						  && !(info.contains("serverSelectionTimeoutMS") || info.contains("connectTimeoutMS"))) {
+					int connectTimeout = (Integer.valueOf((String)info.get(propName))).intValue() * 1000;
+					optionsBuilder = optionsBuilder.serverSelectionTimeout(connectTimeout);
+					optionsBuilder = optionsBuilder.connectTimeout(connectTimeout);
+				}
+				else if (propName.equals("ssl"))
+				{
+					optionsBuilder.sslEnabled(Boolean.valueOf((String) info.get(propName)));
+				}
+				else if (propName.equals("sslInvalidHostNameAllowed"))
+				{
+					optionsBuilder.sslInvalidHostNameAllowed(Boolean.valueOf((String)info.get(propName)));
+				}
+//				else if (propName.equals("serverSelectionTimeoutMS"))
+//				{
+//					optionsBuilder.serverSelectionTimeout(Integer.valueOf((String) info.get(propName)));
+//				}
+				else if (propName.equals("heartbeatFrequencyMS"))
+				{
+					optionsBuilder.heartbeatFrequency(Integer.valueOf((String)info.get(propName)));
+				}
+				else if (propName.equals("localThresholdMS"))
+				{
+					optionsBuilder.localThreshold(Integer.valueOf((String) info.get(propName)));
+				}
+//				else if (propName.equals("connectTimeoutMS"))
+//				{
+//					optionsBuilder.connectTimeout(Integer.valueOf((String) info.get(propName)));
+//				}
+				else if (propName.equals("socketTimeoutMS"))
+				{
+					optionsBuilder.socketTimeout(Integer.valueOf((String)info.get(propName)));
+				}
+				else if (propName.equals("timeZone"))
+				{
+					this.timeZone = (String) info.get(propName);
+				}
+				//excluded properties
+				else if (!(Arrays.asList("hosts", "user", "password", "database").contains(propName)))
+				{
+					optionsString += String.format("&%s=%s", propName, info.get(propName));
+				}
 			}
 		}
+
+		if (url.contains("?"))
+			url += optionsString;
+		else
+			url += "?" + optionsString.substring(1, optionsString.length());
 		MongoClientURI mongoURI = new MongoClientURI(url, optionsBuilder);
 		this.mongoClient = new MongoClient(mongoURI);
 		if (mongoURI.getDatabase() != null)
 			this.database = mongoURI.getDatabase();
 		else
 			this.database = info.getProperty("database");
-
-		String timeZoneProp = info.getProperty("timeZone");
-		if (timeZoneProp != null)
-			this.timeZone = timeZoneProp;
-		else
-			this.timeZone = "UTC";
 
 		//check connection
 		Document pingCommand = new Document("ping", "1");
