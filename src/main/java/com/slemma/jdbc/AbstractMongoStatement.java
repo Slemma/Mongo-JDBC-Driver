@@ -377,26 +377,7 @@ public abstract class AbstractMongoStatement
 	 */
 
 	public boolean getMoreResults(int current) throws SQLException {
-//		if (this.closed) {
-//			throw new MongoSQLException("Statement is closed.");
-//		}
-//		if (current == Statement.CLOSE_CURRENT_RESULT
-//				  || current == Statement.KEEP_CURRENT_RESULT
-//				  || current == Statement.CLOSE_ALL_RESULTS) {
-//
-//			if (BQDatabaseMetadata.multipleOpenResultsSupported
-//					  && (current == Statement.KEEP_CURRENT_RESULT || current == Statement.CLOSE_ALL_RESULTS)) {
-//				throw new UnsupportedOperationException();
-//			}
-//			// Statement.CLOSE_CURRENT_RESULT
-//			this.close();
-//			return false;
-//		}
-//		else {
-//			throw new MongoSQLException("Wrong parameter.");
-//		}
-
-		throw new UnsupportedOperationException();
+		return false;
 	}
 
 	/** {@inheritDoc} */
