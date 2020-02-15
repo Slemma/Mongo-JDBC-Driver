@@ -1608,8 +1608,9 @@ class MongoDatabaseMetadata implements DatabaseMetaData
 			for (int i = 0; i < tables.size(); i++)
 			{
 				String tableName = tables.get(i).getString("name");
-				data[i][0] = ((MongoConnection) this.getConnection()).getDatabase();
-				data[i][1] = null;
+				String dbName = ((MongoConnection) this.getConnection()).getDatabase();
+				data[i][0] = dbName;
+				data[i][1] = dbName;
 				data[i][2] = tableName;
 				data[i][3] = "TABLE";
 			}
